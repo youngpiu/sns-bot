@@ -179,7 +179,7 @@ MAX_FILES_PER_WEBHOOK = 10
 def _without_role_mention(payload: dict[str, object], role_id: str) -> dict[str, object]:
     p = dict(payload)
     if isinstance(p.get("content"), str):
-        p["content"] = p["content"].replace(f"<@&{role_id}>", "").rstrip()
+        p["content"] = p["content"].replace(f"<@&{role_id}>", "\u3164")
     p["allowed_mentions"] = {"parse": [], "roles": []}
     return p
 
