@@ -179,21 +179,6 @@ class InstagramClient:
             media_urls=deduped_media_urls,
         )
 
-    @staticmethod
-    def _remove_pinned_prefix(medias: list[object]) -> list[object]:
-        if len(medias) < 2:
-            return medias
-
-        for start in range(len(medias)):
-            for i in range(start, len(medias) - 1):
-                t1 = getattr(medias[i], "taken_at", None)
-                t2 = getattr(medias[i + 1], "taken_at", None)
-                if t1 and t2 and t2 > t1:
-                    break
-            else:
-                return medias[start:]
-        return medias
-
     def recent_medias(self) -> list[InstagramMedia]:
         self.login()
 
@@ -201,17 +186,15 @@ class InstagramClient:
             self._target_user_id = self.client.user_id_from_username(self.target_username)
 
         medias = self.client.user_medias(self._target_user_id, amount=6)
-        unpinned_medias = self._remove_pinned_prefix(medias)
-        supported_medias = [media for media in unpinned_medias if self._is_supported_profile_media(media)]
+        supported_medias = [media for media in medias if self._is_supported_profile_media(media)]
         if not supported_medias:
             return []
 
         result = [self._to_instagram_media(media) for media in supported_medias]
-        result.sort(key=lambda media: media.taken_at or datetime.min)
+        result.sort(key=lambda media: media.taken_at or datetime.min, reverse=True)
         logger.info(
-            "Resolved %s recent Instagram media candidate(s) for @%s (stripped %s pinned)",
+            "Resolved %s recent Instagram media candidate(s) for @%s",
             len(result),
             self.target_username,
-            len(medias) - len(unpinned_medias),
         )
         return result

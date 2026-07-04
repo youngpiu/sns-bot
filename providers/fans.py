@@ -260,7 +260,7 @@ class FansClient:
 
         variables: dict[str, Any] = {
             "sort": [{"type": "UPDATED_AT", "direction": "DESC"}],
-            "page": {"first": 100},
+            "page": {"first": 3},
             "filter": {
                 "classification_Overlap": ["COMMUNITY"],
             },
@@ -351,7 +351,7 @@ class FansClient:
             result.append(notification)
 
         result = [n for n in result if n.category in NOTIFICATION_CATEGORIES]
-        result.sort(key=lambda n: n.created_at)
+        result.sort(key=lambda n: n.created_at, reverse=True)
         logger.info(
             "Resolved %s Fans notification(s) for %s",
             len(result),

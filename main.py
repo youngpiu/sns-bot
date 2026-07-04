@@ -14,7 +14,8 @@ import requests
 from config import load_settings
 from providers.fans import FansClient, FansNotification, FansAuthError, FansAPIError
 from providers.ig import InstagramClient, InstagramLoginError, InstagramMedia
-from state import STATE_FILE, FANS_STATE_FILE, BotState, FansStateStore, StateStore
+from providers.yt import YouTubeRSS, YouTubeVideo
+from state import IG_STATE_FILE, FANS_STATE_FILE, YT_STATE_FILE, FansStateStore, InstagramStateStore, YouTubeStateStore
 
 
 logging.basicConfig(
@@ -81,20 +82,28 @@ def build_fans_discord_payload(
     }
 
 
-def state_from_media(media: InstagramMedia) -> BotState:
-    return BotState(
-        last_seen_media_pk=media.pk,
-        last_seen_media_code=media.code,
-    )
-
-
-def is_media_after_state(media: InstagramMedia, state: BotState) -> bool:
-    if not state.last_seen_media_pk:
-        return True
-    try:
-        return int(media.pk) > int(state.last_seen_media_pk)
-    except (ValueError, TypeError):
-        return False
+def build_yt_discord_payload(role_id: str, video: YouTubeVideo) -> dict[str, object]:
+    title = video.title.strip()[:2000] or "(no title)"
+    return {
+        "content": f"```{title}```\n<@&{role_id}>",
+        "allowed_mentions": {
+            "parse": [],
+            "roles": [role_id],
+        },
+        "components": [
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "style": 5,
+                        "label": "Xem trên YouTube",
+                        "url": video.url,
+                    }
+                ],
+            }
+        ],
+    }
 
 
 def extension_from_response(url: str, content_type: str | None) -> str:
@@ -135,6 +144,79 @@ def _convert_heic(path: Path) -> Path:
         return path
 
 
+def _crop_black_bars(path: Path, threshold: int = 15) -> Path:
+    try:
+        from PIL import Image
+
+        img = Image.open(path)
+        gray = img.convert("L")
+        w, h = gray.size
+        pix = list(gray.getdata())
+
+        top = 0
+        for y in range(h):
+            if max(pix[y * w : (y + 1) * w]) > threshold:
+                top = y
+                break
+
+        bottom = h
+        for y in range(h - 1, -1, -1):
+            if max(pix[y * w : (y + 1) * w]) > threshold:
+                bottom = y + 1
+                break
+
+        left = 0
+        for x in range(w):
+            if max(pix[y * w + x] for y in range(h)) > threshold:
+                left = x
+                break
+
+        right = w
+        for x in range(w - 1, -1, -1):
+            if max(pix[y * w + x] for y in range(h)) > threshold:
+                right = x + 1
+                break
+
+        if left == 0 and top == 0 and right == w and bottom == h:
+            return path
+
+        img_rgb = img.convert("RGB")
+        cropped = img_rgb.crop((left, top, right, bottom))
+        cropped.save(path, "JPEG", quality=95)
+        logger.info(
+            "Cropped black bars from %s: %sx%s -> %sx%s",
+            path.name, w, h, right - left, bottom - top,
+        )
+    except Exception as exc:
+        logger.warning("Failed to crop black bars for %s: %s", path.name, exc)
+    return path
+
+
+def _download_yt_thumbnail(video_id: str) -> tuple[Path, list[Path]]:
+    temp_dir = Path(tempfile.mkdtemp(prefix=f"yt-{video_id}-"))
+    for size in ("maxresdefault", "sddefault", "hqdefault", "mqdefault"):
+        url = f"https://i.ytimg.com/vi/{video_id}/{size}.jpg"
+        try:
+            response = requests.get(url, stream=True, timeout=60)
+            response.raise_for_status()
+            extension = extension_from_response(url, response.headers.get("content-type"))
+            output_path = temp_dir / f"01{extension}"
+            with output_path.open("wb") as fh:
+                for chunk in response.iter_content(chunk_size=1024 * 256):
+                    if chunk:
+                        fh.write(chunk)
+            output_path = _convert_heic(output_path)
+            output_path = _crop_black_bars(output_path)
+            logger.info("Downloaded YouTube thumbnail %s for %s (size=%s)", size, video_id, output_path.stat().st_size)
+            return temp_dir, [output_path]
+        except Exception as exc:
+            logger.warning("YouTube thumbnail %s not available for %s: %s", size, video_id, exc)
+            continue
+    logger.warning("No YouTube thumbnail available for %s", video_id)
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    return temp_dir, []
+
+
 def download_urls(
     urls: list[str],
     prefix: str,
@@ -143,9 +225,9 @@ def download_urls(
     temp_dir = Path(tempfile.mkdtemp(prefix=prefix))
     downloaded_files: list[Path] = []
 
-    try:
-        for index, url in enumerate(urls, start=1):
-            logger.info("Downloading file %s/%s for %s", index, len(urls), log_label)
+    for index, url in enumerate(urls, start=1):
+        logger.info("Downloading file %s/%s for %s", index, len(urls), log_label)
+        try:
             response = requests.get(url, stream=True, timeout=60)
             response.raise_for_status()
 
@@ -157,6 +239,7 @@ def download_urls(
                         file_handle.write(chunk)
 
             output_path = _convert_heic(output_path)
+            output_path = _crop_black_bars(output_path)
             downloaded_files.append(output_path)
             logger.info(
                 "Downloaded file %s/%s for %s as %s (%s bytes)",
@@ -166,9 +249,9 @@ def download_urls(
                 output_path.name,
                 output_path.stat().st_size,
             )
-    except Exception:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise
+        except Exception as exc:
+            logger.warning("Failed to download %s: %s", url, exc)
+            continue
 
     return temp_dir, downloaded_files
 
@@ -244,14 +327,14 @@ def send_discord_webhook(
 
 async def poll_instagram(
     instagram: InstagramClient,
-    state_store: StateStore,
+    state_store: InstagramStateStore,
     webhook_url: str,
     role_id: str,
     target_username: str,
     interval_seconds: int,
     thread_id: str | None = None,
 ) -> None:
-    state = state_store.load()
+    state_store.load()
     logger.info("Instagram polling started with %s second interval", interval_seconds)
 
     while True:
@@ -259,47 +342,55 @@ async def poll_instagram(
             recent_medias = await asyncio.to_thread(instagram.recent_medias)
             if not recent_medias:
                 logger.info("No Instagram media found for @%s", target_username)
-            elif state.last_seen_media_pk is None:
-                state = state_from_media(recent_medias[-1])
-                state_store.save(state)
-                logger.info("Initialized Instagram state with media pk=%s code=%s", state.last_seen_media_pk, state.last_seen_media_code)
-            else:
-                new_medias = [media for media in recent_medias if is_media_after_state(media, state)]
-                if not new_medias:
-                    logger.info("No new Instagram media for @%s", target_username)
-                else:
-                    logger.info("Found %s new Instagram media item(s) for @%s", len(new_medias), target_username)
+                continue
 
-                for media in new_medias:
-                    logger.info(
-                        "New Instagram media detected pk=%s url_count=%s type=%s product_type=%s",
-                        media.pk,
-                        len(media.media_urls),
-                        media.media_type,
-                        media.product_type,
-                    )
-                    payload = build_discord_payload(role_id, media)
-                    temp_dir: Path | None = None
-                    try:
-                        temp_dir, attachment_paths = await asyncio.to_thread(download_media_files, media)
-                        base_url = f"{webhook_url}?wait=true&with_components=true"
-                        send_tasks = [
-                            asyncio.to_thread(send_discord_webhook, base_url, payload, attachment_paths),
-                        ]
-                        if thread_id:
-                            thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
-                            thread_payload = _without_role_mention(payload, role_id)
-                            send_tasks.append(
-                                asyncio.to_thread(send_discord_webhook, thread_url, thread_payload, attachment_paths),
-                            )
-                        await asyncio.gather(*send_tasks)
-                    finally:
-                        if temp_dir is not None:
-                            shutil.rmtree(temp_dir, ignore_errors=True)
-                            logger.info("Cleaned temporary media files for pk=%s", media.pk)
-                    state = state_from_media(media)
-                    state_store.save(state)
-                    logger.info("Sent Discord webhook notification for Instagram media pk %s", media.pk)
+            if not state_store.is_initialized():
+                state_store.mark_seen(recent_medias[0].pk)
+                state_store.save()
+                logger.info("Initialized Instagram state with media pk=%s", state_store.last_seen_pk)
+                continue
+
+            new_medias: list[InstagramMedia] = []
+            for media in recent_medias:
+                if media.pk == state_store.last_seen_pk:
+                    break
+                new_medias.append(media)
+
+            if not new_medias:
+                logger.info("No new Instagram media for @%s", target_username)
+            else:
+                logger.info("Found %s new Instagram media item(s) for @%s", len(new_medias), target_username)
+
+            for media in new_medias:
+                logger.info(
+                    "New Instagram media detected pk=%s url_count=%s type=%s product_type=%s",
+                    media.pk,
+                    len(media.media_urls),
+                    media.media_type,
+                    media.product_type,
+                )
+                payload = build_discord_payload(role_id, media)
+                temp_dir: Path | None = None
+                try:
+                    temp_dir, attachment_paths = await asyncio.to_thread(download_media_files, media)
+                    base_url = f"{webhook_url}?wait=true&with_components=true"
+                    send_tasks = [
+                        asyncio.to_thread(send_discord_webhook, base_url, payload, attachment_paths),
+                    ]
+                    if thread_id:
+                        thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
+                        thread_payload = _without_role_mention(payload, role_id)
+                        send_tasks.append(
+                            asyncio.to_thread(send_discord_webhook, thread_url, thread_payload, attachment_paths),
+                        )
+                    await asyncio.gather(*send_tasks)
+                finally:
+                    if temp_dir is not None:
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        logger.info("Cleaned temporary media files for pk=%s", media.pk)
+                state_store.mark_seen(media.pk)
+                state_store.save()
+                logger.info("Sent Discord webhook notification for Instagram media pk %s", media.pk)
         except InstagramLoginError as exc:
             logger.error("Instagram login failed: %s", exc)
         except DiscordWebhookError as exc:
@@ -327,19 +418,29 @@ async def poll_fans(
             notifs = await asyncio.to_thread(fans.recent_notifications)
             if not notifs:
                 logger.info("No Fans notifications found for %s", target_group)
-            elif not state_store.is_initialized():
-                for n in notifs:
-                    state_store.mark_seen(n.id)
-                state_store.save()
-                logger.info("Initialized Fans state with %s notification(s)", len(notifs))
-            else:
-                new_notifs = [n for n in notifs if state_store.is_new(n.id)]
-                if not new_notifs:
-                    logger.info("No new Fans notifications for %s", target_group)
-                else:
-                    logger.info("Found %s new Fans notification(s) for %s", len(new_notifs), target_group)
+                continue
 
-                for notif in new_notifs:
+            if not state_store.is_initialized():
+                state_store.mark_seen(notifs[0].id)
+                state_store.save()
+                logger.info(
+                    "Initialized Fans state with newest notification %s for %s",
+                    notifs[0].id, target_group,
+                )
+                continue
+
+            new_notifs: list[FansNotification] = []
+            for n in notifs:
+                if n.id == state_store.last_seen_id:
+                    break
+                new_notifs.append(n)
+
+            if not new_notifs:
+                logger.info("No new Fans notifications for %s", target_group)
+            else:
+                logger.info("Found %s new Fans notification(s) for %s", len(new_notifs), target_group)
+
+            for notif in new_notifs:
                     logger.info(
                         "New Fans notification id=%s category=%s group=%s",
                         notif.id,
@@ -420,6 +521,95 @@ async def poll_fans(
         await asyncio.sleep(interval_seconds)
 
 
+async def poll_youtube(
+    rss_client: YouTubeRSS,
+    state_store: YouTubeStateStore,
+    webhook_url: str,
+    role_id: str,
+    channel_ids: list[str],
+    interval_seconds: int,
+    thread_id: str | None = None,
+) -> None:
+    state_store.load()
+    logger.info(
+        "YouTube polling started for %s channel(s) with %s second interval",
+        len(channel_ids), interval_seconds,
+    )
+
+    while True:
+        try:
+            for channel_id in channel_ids:
+                videos = await asyncio.to_thread(rss_client.fetch_channel, channel_id)
+                if not videos:
+                    continue
+
+                if not state_store.is_initialized():
+                    state_store.mark_seen(videos[0].video_id)
+                    state_store.save()
+                    logger.info(
+                        "Initialized YouTube state with newest video %s for channel %s",
+                        videos[0].video_id, channel_id,
+                    )
+                    continue
+
+                new_videos: list[YouTubeVideo] = []
+                for v in videos:
+                    if v.video_id == state_store.last_seen_id:
+                        break
+                    new_videos.append(v)
+
+                if not new_videos:
+                    logger.info("No new YouTube videos for channel %s", channel_id)
+                else:
+                    logger.info(
+                        "Found %s new YouTube video(s) for channel %s",
+                        len(new_videos), channel_id,
+                    )
+
+                for video in new_videos:
+                        logger.info(
+                            "New YouTube video id=%s title=%s channel=%s",
+                            video.video_id, video.title[:80], video.channel_name,
+                        )
+                        payload = build_yt_discord_payload(role_id, video)
+                        temp_dir: Path | None = None
+                        try:
+                            temp_dir, paths = await asyncio.to_thread(
+                                _download_yt_thumbnail, video.video_id,
+                            )
+
+                            base_url = f"{webhook_url}?wait=true&with_components=true"
+                            send_tasks = [
+                                asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
+                            ]
+                            if thread_id:
+                                thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
+                                thread_payload = _without_role_mention(payload, role_id)
+                                send_tasks.append(
+                                    asyncio.to_thread(
+                                        send_discord_webhook, thread_url, thread_payload, paths,
+                                    ),
+                                )
+                            await asyncio.gather(*send_tasks)
+                        except DiscordWebhookError as exc:
+                            logger.error("Discord webhook send failed: %s", exc)
+                            continue
+                        finally:
+                            if temp_dir is not None:
+                                shutil.rmtree(temp_dir, ignore_errors=True)
+
+                        state_store.mark_seen(video.video_id)
+                        state_store.save()
+                        logger.info("Sent Discord webhook for YouTube video %s", video.video_id)
+
+        except requests.RequestException as exc:
+            logger.error("YouTube RSS fetch failed: %s", exc)
+        except Exception:
+            logger.exception("YouTube polling cycle failed")
+
+        await asyncio.sleep(interval_seconds)
+
+
 async def run_all(settings) -> None:
     tasks = []
 
@@ -429,7 +619,7 @@ async def run_all(settings) -> None:
         sessionid=settings.ig_sessionid,
         proxy=settings.ig_proxy,
     )
-    ig_state = StateStore(STATE_FILE)
+    ig_state = InstagramStateStore(IG_STATE_FILE)
     tasks.append(
         poll_instagram(
             instagram=ig_client,
@@ -465,6 +655,25 @@ async def run_all(settings) -> None:
         )
     else:
         logger.info("Fans credentials not provided, skipping Fans polling")
+
+    if settings.yt_targets:
+        yt_client = YouTubeRSS()
+        yt_webhook = settings.yt_webhook_url or settings.webhook_url
+        yt_role = settings.yt_role_id or settings.role_id
+        yt_state = YouTubeStateStore(YT_STATE_FILE)
+        tasks.append(
+            poll_youtube(
+                rss_client=yt_client,
+                state_store=yt_state,
+                webhook_url=yt_webhook,
+                role_id=yt_role,
+                channel_ids=list(settings.yt_targets),
+                interval_seconds=settings.yt_poll_interval,
+                thread_id=settings.yt_thread_id,
+            )
+        )
+    else:
+        logger.info("YouTube targets not provided, skipping YouTube polling")
 
     await asyncio.gather(*tasks)
 

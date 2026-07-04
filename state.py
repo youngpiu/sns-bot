@@ -1,47 +1,33 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from config import BASE_DIR
 
-STATE_FILE = BASE_DIR / "state.json"
-FANS_STATE_FILE = BASE_DIR / "fans_state.json"
+STATES_DIR = BASE_DIR / "states"
+IG_STATE_FILE = STATES_DIR / "ig_state.json"
+FANS_STATE_FILE = STATES_DIR / "fans_state.json"
+YT_STATE_FILE = STATES_DIR / "yt_state.json"
 
 
-@dataclass(frozen=True)
-class BotState:
-    last_seen_media_pk: str | None = None
-    last_seen_media_code: str | None = None
-
-
-class StateStore:
+class InstagramStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._last_seen_pk: str | None = None
 
-    def load(self) -> BotState:
-        if not self.path.exists():
-            return BotState()
+    def load(self) -> InstagramStateStore:
+        if self.path.exists():
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                self._last_seen_pk = str(data["last_seen_pk"]) if data.get("last_seen_pk") else None
+            except (OSError, json.JSONDecodeError):
+                self._last_seen_pk = None
+        return self
 
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return BotState()
-
-        pk = data.get("last_seen_media_pk")
-        code = data.get("last_seen_media_code")
-        return BotState(
-            last_seen_media_pk=str(pk) if pk else None,
-            last_seen_media_code=str(code) if code else None,
-        )
-
-    def save(self, state: BotState) -> None:
-        payload = {
-            "last_seen_media_pk": state.last_seen_media_pk,
-            "last_seen_media_code": state.last_seen_media_code,
-        }
+    def save(self) -> None:
+        payload = {"last_seen_pk": self._last_seen_pk}
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         with NamedTemporaryFile(
@@ -56,24 +42,36 @@ class StateStore:
 
         temp_path.replace(self.path)
 
+    def is_new(self, pk: str) -> bool:
+        return True
+
+    def mark_seen(self, pk: str) -> None:
+        self._last_seen_pk = pk
+
+    def is_initialized(self) -> bool:
+        return self._last_seen_pk is not None
+
+    @property
+    def last_seen_pk(self) -> str | None:
+        return self._last_seen_pk
+
 
 class FansStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._seen_ids: set[str] = set()
+        self._last_seen_id: str | None = None
 
     def load(self) -> FansStateStore:
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
-                ids = data.get("seen_ids", [])
-                self._seen_ids = set(str(i) for i in ids if i)
+                self._last_seen_id = str(data["last_seen_id"]) if data.get("last_seen_id") else None
             except (OSError, json.JSONDecodeError):
-                self._seen_ids = set()
+                self._last_seen_id = None
         return self
 
     def save(self) -> None:
-        payload = {"seen_ids": sorted(self._seen_ids)}
+        payload = {"last_seen_id": self._last_seen_id}
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         with NamedTemporaryFile(
@@ -89,10 +87,58 @@ class FansStateStore:
         temp_path.replace(self.path)
 
     def is_new(self, notif_id: str) -> bool:
-        return notif_id not in self._seen_ids
+        return True
 
     def mark_seen(self, notif_id: str) -> None:
-        self._seen_ids.add(notif_id)
+        self._last_seen_id = notif_id
 
     def is_initialized(self) -> bool:
-        return len(self._seen_ids) > 0
+        return self._last_seen_id is not None
+
+    @property
+    def last_seen_id(self) -> str | None:
+        return self._last_seen_id
+
+
+class YouTubeStateStore:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._last_seen_id: str | None = None
+
+    def load(self) -> YouTubeStateStore:
+        if self.path.exists():
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                self._last_seen_id = str(data["last_seen_id"]) if data.get("last_seen_id") else None
+            except (OSError, json.JSONDecodeError):
+                self._last_seen_id = None
+        return self
+
+    def save(self) -> None:
+        payload = {"last_seen_id": self._last_seen_id}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        with NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=self.path.parent,
+            delete=False,
+        ) as temp_file:
+            json.dump(payload, temp_file, ensure_ascii=False, indent=2)
+            temp_file.write("\n")
+            temp_path = Path(temp_file.name)
+
+        temp_path.replace(self.path)
+
+    def is_new(self, video_id: str) -> bool:
+        return True
+
+    def mark_seen(self, video_id: str) -> None:
+        self._last_seen_id = video_id
+
+    def is_initialized(self) -> bool:
+        return self._last_seen_id is not None
+
+    @property
+    def last_seen_id(self) -> str | None:
+        return self._last_seen_id
