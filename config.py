@@ -26,6 +26,8 @@ class Settings:
     fans_guid: str | None = None
     fans_target: str | None = None
     fans_poll_interval: int = 300
+    ig_thread_id: str | None = None
+    fans_thread_id: str | None = None
 
 
 def load_settings() -> Settings:
@@ -77,6 +79,9 @@ def load_settings() -> Settings:
     if fans_poll_interval < 30:
         raise ValueError("FANS_POLL_INTERVAL must be at least 30 seconds")
 
+    ig_thread_id = os.getenv("IG_THREAD_ID", "").strip() or None
+    fans_thread_id = os.getenv("FANS_THREAD_ID", "").strip() or None
+
     return Settings(
         webhook_url=webhook_url,
         role_id=role_id,
@@ -91,4 +96,6 @@ def load_settings() -> Settings:
         fans_guid=fans_guid,
         fans_target=fans_target,
         fans_poll_interval=fans_poll_interval,
+        ig_thread_id=ig_thread_id,
+        fans_thread_id=fans_thread_id,
     )

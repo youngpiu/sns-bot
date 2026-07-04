@@ -176,6 +176,14 @@ def download_urls(
 MAX_FILES_PER_WEBHOOK = 10
 
 
+def _without_role_mention(payload: dict[str, object], role_id: str) -> dict[str, object]:
+    p = dict(payload)
+    if isinstance(p.get("content"), str):
+        p["content"] = p["content"].replace(f"<@&{role_id}>", "").rstrip()
+    p["allowed_mentions"] = {"parse": [], "roles": []}
+    return p
+
+
 def send_discord_webhook(
     webhook_url: str,
     payload: dict[str, object],
@@ -204,8 +212,7 @@ def send_discord_webhook(
                 len(chunks),
                 len(files),
             )
-            response = requests.post(
-                f"{webhook_url}?wait=true&with_components=true",
+            response = requests.post(webhook_url,
                 data={"payload_json": json.dumps(chunk_payload, ensure_ascii=False)},
                 files=files or None,
                 timeout=120,
@@ -232,6 +239,7 @@ async def poll_instagram(
     role_id: str,
     target_username: str,
     interval_seconds: int,
+    thread_id: str | None = None,
 ) -> None:
     state = state_store.load()
     logger.info("Instagram polling started with %s second interval", interval_seconds)
@@ -264,7 +272,17 @@ async def poll_instagram(
                     temp_dir: Path | None = None
                     try:
                         temp_dir, attachment_paths = await asyncio.to_thread(download_media_files, media)
-                        await asyncio.to_thread(send_discord_webhook, webhook_url, payload, attachment_paths)
+                        base_url = f"{webhook_url}?wait=true&with_components=true"
+                        send_tasks = [
+                            asyncio.to_thread(send_discord_webhook, base_url, payload, attachment_paths),
+                        ]
+                        if thread_id:
+                            thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
+                            thread_payload = _without_role_mention(payload, role_id)
+                            send_tasks.append(
+                                asyncio.to_thread(send_discord_webhook, thread_url, thread_payload, attachment_paths),
+                            )
+                        await asyncio.gather(*send_tasks)
                     finally:
                         if temp_dir is not None:
                             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -289,6 +307,7 @@ async def poll_fans(
     role_id: str,
     target_group: str,
     interval_seconds: int,
+    thread_id: str | None = None,
 ) -> None:
     state_store.load()
     logger.info("Fans polling started for %s with %s second interval", target_group, interval_seconds)
@@ -355,7 +374,17 @@ async def poll_fans(
                             paths = []
 
                         payload = build_fans_discord_payload(role_id, notif, body)
-                        await asyncio.to_thread(send_discord_webhook, webhook_url, payload, paths)
+                        base_url = f"{webhook_url}?wait=true&with_components=true"
+                        send_tasks = [
+                            asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
+                        ]
+                        if thread_id:
+                            thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
+                            thread_payload = _without_role_mention(payload, role_id)
+                            send_tasks.append(
+                                asyncio.to_thread(send_discord_webhook, thread_url, thread_payload, paths),
+                            )
+                        await asyncio.gather(*send_tasks)
                     except DiscordWebhookError as exc:
                         logger.error("Discord webhook send failed: %s", exc)
                         continue
@@ -399,6 +428,7 @@ async def run_all(settings) -> None:
             role_id=settings.role_id,
             target_username=settings.ig_target,
             interval_seconds=settings.poll_interval,
+            thread_id=settings.ig_thread_id,
         )
     )
 
@@ -420,6 +450,7 @@ async def run_all(settings) -> None:
                 role_id=fans_role,
                 target_group=settings.fans_target,
                 interval_seconds=settings.fans_poll_interval,
+                thread_id=settings.fans_thread_id,
             )
         )
     else:
