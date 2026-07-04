@@ -418,6 +418,10 @@ async def poll_fans(
     while True:
         try:
             notifs = await asyncio.to_thread(fans.recent_notifications)
+            rt = fans.auth.get_refresh_token()
+            if rt and rt != state_store.refresh_token:
+                state_store.set_refresh_token(rt)
+                state_store.save()
             if not notifs:
                 logger.info("No Fans notifications found for %s", target_group)
                 continue
@@ -635,15 +639,16 @@ async def run_all(settings) -> None:
     )
 
     if settings.fans_token and settings.fans_client_uuid and settings.fans_guid and settings.fans_target:
+        fans_state = FansStateStore(FANS_STATE_FILE).load()
         fans_client = FansClient(
             token=settings.fans_token,
             client_uuid=settings.fans_client_uuid,
             guid=settings.fans_guid,
             target_group=settings.fans_target,
+            refresh_token=fans_state.refresh_token or settings.fans_refresh_token,
         )
         fans_webhook = settings.fans_webhook_url or settings.webhook_url
         fans_role = settings.fans_role_id or settings.role_id
-        fans_state = FansStateStore(FANS_STATE_FILE)
         tasks.append(
             poll_fans(
                 fans=fans_client,

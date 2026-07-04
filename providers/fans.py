@@ -61,13 +61,100 @@ class FansNotification:
         return self.link_url or "https://app.fans/"
 
 
+GRAPHQL_QUERIES = {
+    "SendEmailCode": """
+        mutation SendEmailCode($email: String!) {
+          sendEmailVerificationCode(email: $email) {
+            ok errors { code title messages isExpected __typename }
+            __typename
+          }
+        }
+    """,
+    "ConfirmEmail": """
+        mutation ConfirmEmail($email: String!, $code: String!) {
+          confirmEmailVerificationCode(email: $email, code: $code) {
+            ok errors { code title messages isExpected __typename }
+            emailToken userExists __typename
+          }
+        }
+    """,
+    "LoginEmailToken": """
+        mutation LoginEmailToken($clientUuid: String, $emailToken: String) {
+          login(clientUuid: $clientUuid, emailToken: $emailToken, grantType: JWT) {
+            ok errors { code title messages isExpected __typename }
+            token accessToken refreshToken __typename
+          }
+        }
+    """,
+}
+
+
+def _graphql_request(query: str, variables: dict[str, Any], guid: str) -> dict[str, Any]:
+    import http.client
+
+    payload = json.dumps({"query": query, "variables": variables})
+    parsed = urllib.parse.urlparse(API_URL)
+    headers = {
+        "j-guid": guid,
+        "j-operation-type": "mutation",
+        "j-context": "web",
+        "j-language": "en",
+        "Content-Type": "application/json",
+        "Origin": "https://app.fans",
+        "Referer": "https://app.fans/",
+    }
+    conn = http.client.HTTPSConnection(parsed.hostname, timeout=30)
+    try:
+        conn.request("POST", parsed.path or "/", body=payload, headers=headers)
+        resp = conn.getresponse()
+        body = resp.read()
+        return json.loads(body)
+    finally:
+        conn.close()
+
+
+def send_verification_code(email: str, guid: str) -> bool:
+    result = _graphql_request(GRAPHQL_QUERIES["SendEmailCode"], {"email": email}, guid)
+    return bool(result.get("data", {}).get("sendEmailVerificationCode", {}).get("ok"))
+
+
+def confirm_login(email: str, code: str, client_uuid: str, guid: str) -> tuple[str, str]:
+    result = _graphql_request(GRAPHQL_QUERIES["ConfirmEmail"], {"email": email, "code": code}, guid)
+    confirm = result.get("data", {}).get("confirmEmailVerificationCode", {})
+    if not confirm.get("ok"):
+        errors = confirm.get("errors") or []
+        raise FansAuthError(f"Email confirmation failed: {errors}")
+
+    email_token = confirm.get("emailToken")
+    if not email_token:
+        raise FansAuthError("No emailToken in confirm response")
+
+    result2 = _graphql_request(
+        GRAPHQL_QUERIES["LoginEmailToken"],
+        {"clientUuid": client_uuid, "emailToken": email_token},
+        guid,
+    )
+    login_data = result2.get("data", {}).get("login", {})
+    if not login_data.get("ok"):
+        errors = login_data.get("errors") or []
+        raise FansAuthError(f"Login failed: {errors}")
+
+    access_token = login_data.get("accessToken")
+    refresh_token = login_data.get("refreshToken")
+    if not access_token or not refresh_token:
+        raise FansAuthError("No access/refresh token in login response")
+
+    return access_token, refresh_token
+
+
 class FansAuth:
-    def __init__(self, token: str, client_uuid: str, guid: str) -> None:
+    def __init__(self, token: str, client_uuid: str, guid: str, refresh_token: str | None = None) -> None:
         self._token = token
-        self._client_uuid = client_uuid
+        self._refresh_token = refresh_token
         self._guid = guid
         self._decoded: dict[str, Any] = {}
         self._decode_token()
+        self._client_uuid = self._decoded.get("ucu", client_uuid)
 
     def _decode_token(self) -> None:
         try:
@@ -91,33 +178,30 @@ class FansAuth:
     def get_token(self) -> str:
         return self._token
 
+    def get_refresh_token(self) -> str | None:
+        return self._refresh_token
+
+    def set_tokens(self, access_token: str, refresh_token: str) -> None:
+        self._token = access_token
+        self._refresh_token = refresh_token
+        self._decode_token()
+
     def refresh(self) -> str:
+        if not self._refresh_token:
+            raise FansAuthError("No refresh token available — login via email first")
+
         import http.client
-        import io
-        import random
-        import string
-
-        boundary = "----" + "".join(random.choices(string.ascii_letters + string.digits, k=16))
-
-        def _encode_field(name: str, value: str) -> bytes:
-            return (
-                f"--{boundary}\r\n"
-                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
-                f"{value}\r\n"
-            ).encode()
-
-        body = _encode_field("accessToken", self._token) + _encode_field("clientUuid", self._client_uuid) + f"--{boundary}--\r\n".encode()
 
         parsed = urllib.parse.urlparse(REFRESH_URL)
         conn = http.client.HTTPSConnection(parsed.hostname, timeout=30)
         headers = {
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Cookie": f"refreshToken:web={self._refresh_token}",
             "j-context": "web",
             "j-language": "en",
             "j-guid": self._guid,
         }
         try:
-            conn.request("POST", parsed.path or "/", body=body, headers=headers)
+            conn.request("POST", parsed.path or "/", headers=headers)
             resp = conn.getresponse()
             data = json.loads(resp.read())
             conn.close()
@@ -126,7 +210,11 @@ class FansAuth:
             if not new_token:
                 err = data.get("error", "unknown") if isinstance(data, dict) else "unknown"
                 raise FansAuthError(f"Token refresh returned no accessToken (server: {err})")
+
             self._token = new_token
+            new_refresh = (data or {}).get("refreshToken")
+            if new_refresh:
+                self._refresh_token = new_refresh
             self._decode_token()
             logger.info("Fans JWT refreshed successfully")
             return self._token
@@ -154,10 +242,10 @@ class FansClient:
         client_uuid: str,
         guid: str,
         target_group: str,
+        refresh_token: str | None = None,
     ) -> None:
-        self.auth = FansAuth(token, client_uuid, guid)
+        self.auth = FansAuth(token, client_uuid, guid, refresh_token)
         self._target_group = self._resolve_group(target_group)
-        self._seen_ids: set[str] = set()
 
     @staticmethod
     def _resolve_group(code_or_name: str) -> dict[str, str]:
@@ -358,3 +446,39 @@ class FansClient:
             self._target_group["name"],
         )
         return result
+
+
+def main() -> None:
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="FANS provider utilities")
+    sub = parser.add_subparsers(dest="command")
+
+    login_parser = sub.add_parser("login", help="Login via email verification code")
+    login_parser.add_argument("--email", required=True, help="Email address")
+    login_parser.add_argument("--guid", required=True, help="j-guid (from .env FANS_GUID)")
+    login_parser.add_argument("--client-uuid", required=True, help="j-client-uuid (from .env FANS_CLIENT_UUID)")
+
+    args = parser.parse_args()
+
+    if args.command == "login":
+        print(f"Sending verification code to {args.email}...")
+        ok = send_verification_code(args.email, args.guid)
+        if not ok:
+            print("Failed to send verification code")
+            sys.exit(1)
+        print("Code sent! Check your email.")
+        code = input("Enter verification code: ").strip()
+        if not code:
+            print("No code entered")
+            sys.exit(1)
+        access_token, refresh_token = confirm_login(args.email, code, args.client_uuid, args.guid)
+        print("\n=== NEW TOKENS ===")
+        print(f"FANS_TOKEN={access_token}")
+        print(f"FANS_REFRESH_TOKEN={refresh_token}")
+        print("\nAdd these to your .env file.")
+
+
+if __name__ == "__main__":
+    main()

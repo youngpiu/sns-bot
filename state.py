@@ -60,18 +60,23 @@ class FansStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._last_seen_id: str | None = None
+        self._refresh_token: str | None = None
 
     def load(self) -> FansStateStore:
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 self._last_seen_id = str(data["last_seen_id"]) if data.get("last_seen_id") else None
+                self._refresh_token = str(data["refresh_token"]) if data.get("refresh_token") else None
             except (OSError, json.JSONDecodeError):
                 self._last_seen_id = None
+                self._refresh_token = None
         return self
 
     def save(self) -> None:
         payload = {"last_seen_id": self._last_seen_id}
+        if self._refresh_token:
+            payload["refresh_token"] = self._refresh_token
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         with NamedTemporaryFile(
@@ -98,6 +103,13 @@ class FansStateStore:
     @property
     def last_seen_id(self) -> str | None:
         return self._last_seen_id
+
+    @property
+    def refresh_token(self) -> str | None:
+        return self._refresh_token
+
+    def set_refresh_token(self, token: str) -> None:
+        self._refresh_token = token
 
 
 class YouTubeStateStore:
