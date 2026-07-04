@@ -194,6 +194,8 @@ def send_discord_webhook(
         for i in range(0, len(attachment_paths), MAX_FILES_PER_WEBHOOK)
     ]
 
+    has_components = bool(payload.get("components"))
+
     for chunk_idx, chunk in enumerate(chunks):
         file_handles: list[object] = []
         files: list[tuple[str, tuple[str, object, str]]] = []
@@ -205,7 +207,15 @@ def send_discord_webhook(
                 mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
                 files.append((f"files[{index}]", (path.name, file_handle, mime_type)))
 
-            chunk_payload = payload if chunk_idx == 0 else {"content": ""}
+            if len(chunks) == 1:
+                chunk_payload = payload
+            elif chunk_idx == 0:
+                chunk_payload = dict(payload)
+                chunk_payload.pop("components", None)
+            elif chunk_idx == len(chunks) - 1 and has_components:
+                chunk_payload = {"content": "", "components": payload["components"]}
+            else:
+                chunk_payload = {"content": ""}
             logger.info(
                 "Sending Discord webhook chunk %s/%s with %s attachment(s)",
                 chunk_idx + 1,
