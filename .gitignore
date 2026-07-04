@@ -4,5 +4,6 @@ __pycache__/
 .venv/
 venv/
 state.json
+fans_state.json
 instagram_session.json
 *.log

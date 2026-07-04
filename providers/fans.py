@@ -7,7 +7,6 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 
@@ -155,11 +154,9 @@ class FansClient:
         client_uuid: str,
         guid: str,
         target_group: str,
-        state_file: Path | None = None,
     ) -> None:
         self.auth = FansAuth(token, client_uuid, guid)
         self._target_group = self._resolve_group(target_group)
-        self._state_file = state_file
         self._seen_ids: set[str] = set()
 
     @staticmethod

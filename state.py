@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from config import BASE_DIR
+
+STATE_FILE = BASE_DIR / "state.json"
+FANS_STATE_FILE = BASE_DIR / "fans_state.json"
+
 
 @dataclass(frozen=True)
 class BotState:

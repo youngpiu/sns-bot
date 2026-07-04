@@ -18,7 +18,6 @@ class Settings:
     ig_proxy: str | None = None
     ig_sessionid: str | None = None
     poll_interval: int = 600
-    state_file: Path = BASE_DIR / "state.json"
     instagram_session_file: Path = BASE_DIR / "instagram_session.json"
     fans_webhook_url: str | None = None
     fans_role_id: str | None = None
@@ -27,7 +26,6 @@ class Settings:
     fans_guid: str | None = None
     fans_target: str | None = None
     fans_poll_interval: int = 300
-    fans_state_file: Path = BASE_DIR / "fans_state.json"
 
 
 def load_settings() -> Settings:

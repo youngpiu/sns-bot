@@ -14,7 +14,7 @@ import requests
 from config import load_settings
 from providers.fans import FansClient, FansNotification, FansAuthError, FansAPIError
 from providers.ig import InstagramClient, InstagramLoginError, InstagramMedia
-from state import BotState, FansStateStore, StateStore
+from state import STATE_FILE, FANS_STATE_FILE, BotState, FansStateStore, StateStore
 
 
 logging.basicConfig(
@@ -390,7 +390,7 @@ async def run_all(settings) -> None:
         sessionid=settings.ig_sessionid,
         proxy=settings.ig_proxy,
     )
-    ig_state = StateStore(settings.state_file)
+    ig_state = StateStore(STATE_FILE)
     tasks.append(
         poll_instagram(
             instagram=ig_client,
@@ -411,7 +411,7 @@ async def run_all(settings) -> None:
         )
         fans_webhook = settings.fans_webhook_url or settings.webhook_url
         fans_role = settings.fans_role_id or settings.role_id
-        fans_state = FansStateStore(settings.fans_state_file)
+        fans_state = FansStateStore(FANS_STATE_FILE)
         tasks.append(
             poll_fans(
                 fans=fans_client,
