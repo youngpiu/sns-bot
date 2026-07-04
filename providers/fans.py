@@ -124,7 +124,8 @@ class FansAuth:
 
             new_token = (data or {}).get("accessToken")
             if not new_token:
-                raise FansAuthError("Token refresh returned no accessToken")
+                err = data.get("error", "unknown") if isinstance(data, dict) else "unknown"
+                raise FansAuthError(f"Token refresh returned no accessToken (server: {err})")
             self._token = new_token
             self._decode_token()
             logger.info("Fans JWT refreshed successfully")
@@ -135,15 +136,14 @@ class FansAuth:
             raise FansAuthError(f"Token refresh failed: {exc}") from exc
 
     def ensure_token(self) -> str:
-        if self.is_expired():
-            logger.info("Fans JWT expired, refreshing...")
-            return self.refresh()
-        if self.should_refresh():
-            try:
+        try:
+            if self.is_expired():
+                logger.info("Fans JWT expired, refreshing...")
                 return self.refresh()
-            except FansAuthError:
-                logger.warning("Fans JWT soft refresh failed, using current token")
-                return self._token
+            if self.should_refresh():
+                return self.refresh()
+        except FansAuthError:
+            logger.warning("Fans JWT refresh failed, using current token")
         return self._token
 
 
