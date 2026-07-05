@@ -637,28 +637,93 @@ async def run_all(settings) -> None:
         else:
             logger.info("Không tìm thấy Fans session, bỏ qua poll Fans (chạy: python -m login)")
 
-    if settings.yt_targets and settings.ngrok_token:
-        ngrok.set_auth_token(settings.ngrok_token)
-        notifier = AsyncYouTubeNotifier()
+    if settings.yt_targets:
         yt_state = YouTubeStateStore(YT_STATE_FILE).load()
         yt_webhook = settings.yt_webhook_url or settings.webhook_url
         yt_role = settings.yt_role_id or settings.role_id
 
+        if settings.ngrok_token:
+            tasks.append(
+                _yt_push_notifier(
+                    ngrok_token=settings.ngrok_token,
+                    yt_targets=settings.yt_targets,
+                    yt_webhook=yt_webhook,
+                    yt_role=yt_role,
+                    yt_thread_id=settings.yt_thread_id,
+                    yt_state=yt_state,
+                )
+            )
+        else:
+            logger.warning("Cần NGROK_TOKEN để dùng YouTube push notification — bỏ qua YouTube")
+
+    if not tasks:
+        logger.info("Không có tác vụ nào để chạy")
+        return
+
+    await asyncio.gather(*tasks)
+
+
+async def _yt_push_notifier(
+    ngrok_token: str,
+    yt_targets: tuple[str, ...],
+    yt_webhook: str,
+    yt_role: str,
+    yt_thread_id: str | None,
+    yt_state: YouTubeStateStore,
+) -> None:
+    try:
+        ngrok.set_auth_token(ngrok_token)
+        notifier = AsyncYouTubeNotifier()
+
         @notifier.upload()
         async def on_yt_upload(video: Video) -> None:
-            await _handle_yt_video(video, yt_webhook, yt_role, settings.yt_thread_id, yt_state)
+            await _handle_yt_video(video, yt_webhook, yt_role, yt_thread_id, yt_state)
 
-        logger.info("Bắt đầu YouTube notifier với %s kênh", len(settings.yt_targets))
-        channel_ids = [_normalize_channel_id(c) for c in settings.yt_targets]
-        async with notifier.run_in_background():
+        logger.info("Bắt đầu YouTube notifier với %s kênh", len(yt_targets))
+        channel_ids = [_normalize_channel_id(c) for c in yt_targets]
+
+        yt_task = asyncio.create_task(notifier.run())
+
+        try:
+            start = asyncio.get_event_loop().time()
+            while not notifier.is_ready:
+                if yt_task.done():
+                    try:
+                        yt_task.result()
+                    except Exception as exc:
+                        logger.warning("YouTube notifier thất bại ngay lập tức: %s", exc)
+                    return
+                if asyncio.get_event_loop().time() - start > 30:
+                    raise asyncio.TimeoutError
+                await asyncio.sleep(1)
+        except asyncio.TimeoutError:
+            logger.warning("YouTube push notification không khả dụng (ngrok) sau 30s — bỏ qua")
+            notifier.stop()
+            yt_task.cancel()
+            try:
+                await yt_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            return
+
+        try:
             await notifier.subscribe(channel_ids)
-            await asyncio.gather(*tasks)
-    elif settings.yt_targets:
-        logger.warning("Cần NGROK_TOKEN để dùng YouTube push notification")
-        await asyncio.gather(*tasks)
-    else:
-        logger.info("Không có YouTube targets, bỏ qua")
-        await asyncio.gather(*tasks)
+        except Exception as exc:
+            logger.warning("YouTube subscribe thất bại: %s — bỏ qua YouTube", exc)
+            notifier.stop()
+            yt_task.cancel()
+            try:
+                await yt_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            return
+
+        logger.info("YouTube notifier đã sẵn sàng")
+        await yt_task
+    except asyncio.CancelledError:
+        notifier.stop()
+    except Exception as exc:
+        logger.warning("YouTube push notification thất bại: %s", exc)
 
 
 def main() -> None:
