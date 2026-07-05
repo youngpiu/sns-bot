@@ -573,68 +573,65 @@ async def poll_twitter(
     while True:
         try:
             tweets = await twitter.recent_tweets()
-            if not tweets:
-                logger.info("Không có tweet Twitter nào cho @%s", target_username)
-                continue
+            if tweets:
+                if not state_store.is_initialized():
+                    state_store.mark_seen(tweets[0].id)
+                    state_store.save()
+                    logger.info("Đã khởi tạo state Twitter với tweet id=%s", state_store.last_seen_id)
+                else:
+                    new_tweets: list[TwitterTweet] = []
+                    for t in tweets:
+                        if t.id == state_store.last_seen_id:
+                            break
+                        new_tweets.append(t)
 
-            if not state_store.is_initialized():
-                state_store.mark_seen(tweets[0].id)
-                state_store.save()
-                logger.info("Đã khởi tạo state Twitter với tweet id=%s", state_store.last_seen_id)
-                continue
-
-            new_tweets: list[TwitterTweet] = []
-            for t in tweets:
-                if t.id == state_store.last_seen_id:
-                    break
-                new_tweets.append(t)
-
-            if not new_tweets:
-                logger.info("Không có tweet Twitter mới cho @%s", target_username)
-            else:
-                logger.info("Tìm thấy %s tweet Twitter mới cho @%s", len(new_tweets), target_username)
-
-            for tweet in new_tweets:
-                logger.info(
-                    "Tweet Twitter mới: id=%s media_count=%s",
-                    tweet.id,
-                    len(tweet.media_urls),
-                )
-                payload = build_twitter_discord_payload(role_id, tweet)
-                temp_dir: Path | None = None
-                try:
-                    if tweet.media_urls:
-                        temp_dir, paths = await asyncio.to_thread(
-                            download_urls,
-                            tweet.media_urls[:10],
-                            prefix=f"twitter-{tweet.id}-",
-                            log_label=f"tweet={tweet.id}",
-                        )
+                    if not new_tweets:
+                        logger.info("Không có tweet Twitter mới cho @%s", target_username)
                     else:
-                        paths = []
+                        logger.info("Tìm thấy %s tweet Twitter mới cho @%s", len(new_tweets), target_username)
 
-                    base_url = f"{webhook_url}?wait=true&with_components=true"
-                    send_tasks = [
-                        asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
-                    ]
-                    if thread_id:
-                        thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
-                        thread_payload = _without_role_mention(payload, role_id)
-                        send_tasks.append(
-                            asyncio.to_thread(send_discord_webhook, thread_url, thread_payload, paths),
+                    for tweet in new_tweets:
+                        logger.info(
+                            "Tweet Twitter mới: id=%s media_count=%s",
+                            tweet.id,
+                            len(tweet.media_urls),
                         )
-                    await asyncio.gather(*send_tasks)
-                except DiscordWebhookError as exc:
-                    logger.error("Gửi Discord webhook thất bại: %s", exc)
-                    continue
-                finally:
-                    if temp_dir is not None:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        payload = build_twitter_discord_payload(role_id, tweet)
+                        temp_dir: Path | None = None
+                        try:
+                            if tweet.media_urls:
+                                temp_dir, paths = await asyncio.to_thread(
+                                    download_urls,
+                                    tweet.media_urls[:10],
+                                    prefix=f"twitter-{tweet.id}-",
+                                    log_label=f"tweet={tweet.id}",
+                                )
+                            else:
+                                paths = []
 
-                state_store.mark_seen(tweet.id)
-                state_store.save()
-                logger.info("Đã gửi Discord webhook cho Twitter tweet %s", tweet.id)
+                            base_url = f"{webhook_url}?wait=true&with_components=true"
+                            send_tasks = [
+                                asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
+                            ]
+                            if thread_id:
+                                thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
+                                thread_payload = _without_role_mention(payload, role_id)
+                                send_tasks.append(
+                                    asyncio.to_thread(send_discord_webhook, thread_url, thread_payload, paths),
+                                )
+                            await asyncio.gather(*send_tasks)
+                        except DiscordWebhookError as exc:
+                            logger.error("Gửi Discord webhook thất bại: %s", exc)
+                            continue
+                        finally:
+                            if temp_dir is not None:
+                                shutil.rmtree(temp_dir, ignore_errors=True)
 
+                        state_store.mark_seen(tweet.id)
+                        state_store.save()
+                        logger.info("Đã gửi Discord webhook cho Twitter tweet %s", tweet.id)
+            else:
+                logger.info("Không có tweet Twitter nào cho @%s", target_username)
         except TwitterLoginError as exc:
             logger.error("Đăng nhập Twitter thất bại: %s", exc)
         except Exception:

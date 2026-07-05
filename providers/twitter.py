@@ -70,11 +70,7 @@ class TwitterClient:
     async def recent_tweets(self) -> list[TwitterTweet]:
         await self.authenticate()
 
-        try:
-            tweets_data = await self.app.get_tweets(self.target_username, replies=False)
-        except Exception as exc:
-            logger.warning("Lấy tweet Twitter cho %s thất bại: %s", self.target_username, exc)
-            return []
+        tweets_data = await self.app.get_tweets(self.target_username, replies=False)
 
         tweets: list[TwitterTweet] = []
         for item in tweets_data:
