@@ -8,3 +8,4 @@ fans_state.json
 instagram_session.json
 *.log
 sessions/fans_session.json
+sessions/tmp*
