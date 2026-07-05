@@ -7,4 +7,4 @@ state.json
 fans_state.json
 instagram_session.json
 *.log
-sessions/
+sessions/fans_session.json

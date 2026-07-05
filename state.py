@@ -60,18 +60,12 @@ class FansStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._last_seen_id: str | None = None
-        self._refresh_token: str | None = None
-        self._client_uuid: str | None = None
-        self._guid: str | None = None
 
     def load(self) -> FansStateStore:
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 self._last_seen_id = str(data["last_seen_id"]) if data.get("last_seen_id") else None
-                self._refresh_token = str(data["refresh_token"]) if data.get("refresh_token") else None
-                self._client_uuid = str(data["client_uuid"]) if data.get("client_uuid") else None
-                self._guid = str(data["guid"]) if data.get("guid") else None
             except (OSError, json.JSONDecodeError):
                 pass
         return self
@@ -80,12 +74,6 @@ class FansStateStore:
         payload: dict[str, str] = {}
         if self._last_seen_id is not None:
             payload["last_seen_id"] = self._last_seen_id
-        if self._refresh_token is not None:
-            payload["refresh_token"] = self._refresh_token
-        if self._client_uuid is not None:
-            payload["client_uuid"] = self._client_uuid
-        if self._guid is not None:
-            payload["guid"] = self._guid
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         with NamedTemporaryFile(
@@ -112,27 +100,6 @@ class FansStateStore:
     @property
     def last_seen_id(self) -> str | None:
         return self._last_seen_id
-
-    @property
-    def refresh_token(self) -> str | None:
-        return self._refresh_token
-
-    @property
-    def client_uuid(self) -> str | None:
-        return self._client_uuid
-
-    @property
-    def guid(self) -> str | None:
-        return self._guid
-
-    def set_refresh_token(self, token: str) -> None:
-        self._refresh_token = token
-
-    def set_client_uuid(self, uuid: str) -> None:
-        self._client_uuid = uuid
-
-    def set_guid(self, guid: str) -> None:
-        self._guid = guid
 
 
 class YouTubeStateStore:

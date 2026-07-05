@@ -18,15 +18,10 @@ class Settings:
     ig_proxy: str | None = None
     ig_sessionid: str | None = None
     poll_interval: int = 600
-    instagram_session_file: Path = BASE_DIR / "instagram_session.json"
+    instagram_session_file: Path = BASE_DIR / "sessions" / "instagram_session.json"
     fans_webhook_url: str | None = None
     fans_role_id: str | None = None
-    fans_token: str | None = None
-    fans_client_uuid: str | None = None
-    fans_guid: str | None = None
     fans_target: str | None = None
-    fans_refresh_token: str | None = None
-    fans_email_user: str | None = None
     fans_poll_interval: int = 300
     ig_thread_id: str | None = None
     fans_thread_id: str | None = None
@@ -72,12 +67,7 @@ def load_settings() -> Settings:
 
     fans_webhook_url = os.getenv("FANS_WEBHOOK", "").strip() or None
     fans_role_id = os.getenv("FANS_ROLE", "").strip() or None
-    fans_token = os.getenv("FANS_TOKEN", "").strip() or None
-    fans_client_uuid = os.getenv("FANS_CLIENT_UUID", "").strip() or None
-    fans_guid = os.getenv("FANS_GUID", "").strip() or None
     fans_target = os.getenv("FANS_TARGET", "").strip() or None
-    fans_refresh_token = os.getenv("FANS_REFRESH_TOKEN", "").strip() or None
-    fans_email_user = os.getenv("FANS_EMAIL", "").strip() or None
 
     fans_poll_interval_raw = os.getenv("FANS_POLL_INTERVAL", "300").strip()
     try:
@@ -119,11 +109,7 @@ def load_settings() -> Settings:
         poll_interval=poll_interval,
         fans_webhook_url=fans_webhook_url,
         fans_role_id=fans_role_id,
-        fans_token=fans_token,
-        fans_client_uuid=fans_client_uuid,
-        fans_guid=fans_guid,
         fans_target=fans_target,
-        fans_refresh_token=fans_refresh_token,
         fans_poll_interval=fans_poll_interval,
         ig_thread_id=ig_thread_id,
         fans_thread_id=fans_thread_id,

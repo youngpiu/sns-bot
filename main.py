@@ -15,6 +15,7 @@ from config import load_settings
 from providers.fans import FansClient, FansNotification, FansAuthError, FansAPIError
 from providers.ig import InstagramClient, InstagramLoginError, InstagramMedia
 from providers.yt import YouTubeRSS, YouTubeVideo
+from sessions import FansSessionStore
 from state import IG_STATE_FILE, FANS_STATE_FILE, YT_STATE_FILE, FansStateStore, InstagramStateStore, YouTubeStateStore
 
 
@@ -418,10 +419,6 @@ async def poll_fans(
     while True:
         try:
             notifs = await asyncio.to_thread(fans.recent_notifications)
-            rt = fans.auth.get_refresh_token()
-            if rt and rt != state_store.refresh_token:
-                state_store.set_refresh_token(rt)
-                state_store.save()
             if not notifs:
                 logger.info("No Fans notifications found for %s", target_group)
                 continue
@@ -638,39 +635,30 @@ async def run_all(settings) -> None:
         )
     )
 
-    if settings.fans_token and settings.fans_target:
-        fans_state = FansStateStore(FANS_STATE_FILE).load()
-        cu = fans_state.client_uuid or settings.fans_client_uuid
-        g = fans_state.guid or settings.fans_guid
-        fans_client = FansClient(
-            token=settings.fans_token,
-            client_uuid=cu,
-            guid=g,
-            target_group=settings.fans_target,
-            refresh_token=fans_state.refresh_token or settings.fans_refresh_token,
-        )
-        # persist auto-generated client_uuid/guid back to state
-        if fans_state.client_uuid != fans_client.auth._client_uuid:
-            fans_state.set_client_uuid(fans_client.auth._client_uuid)
-        if fans_state.guid != fans_client.auth._guid:
-            fans_state.set_guid(fans_client.auth._guid)
-        if fans_state.client_uuid is not None or fans_state.guid is not None:
-            fans_state.save()
-        fans_webhook = settings.fans_webhook_url or settings.webhook_url
-        fans_role = settings.fans_role_id or settings.role_id
-        tasks.append(
-            poll_fans(
-                fans=fans_client,
-                state_store=fans_state,
-                webhook_url=fans_webhook,
-                role_id=fans_role,
-                target_group=settings.fans_target,
-                interval_seconds=settings.fans_poll_interval,
-                thread_id=settings.fans_thread_id,
+    if settings.fans_target:
+        try:
+            fans_session = FansSessionStore().load()
+            fans_client = FansClient(session=fans_session, target_group=settings.fans_target)
+        except FansAuthError:
+            fans_client = None
+            fans_session = FansSessionStore()
+        if fans_client is not None:
+            fans_state = FansStateStore(FANS_STATE_FILE).load()
+            fans_webhook = settings.fans_webhook_url or settings.webhook_url
+            fans_role = settings.fans_role_id or settings.role_id
+            tasks.append(
+                poll_fans(
+                    fans=fans_client,
+                    state_store=fans_state,
+                    webhook_url=fans_webhook,
+                    role_id=fans_role,
+                    target_group=settings.fans_target,
+                    interval_seconds=settings.fans_poll_interval,
+                    thread_id=settings.fans_thread_id,
+                )
             )
-        )
-    else:
-        logger.info("Fans credentials not provided, skipping Fans polling")
+        else:
+            logger.info("Fans session not found, skipping Fans polling (run: python -m providers.fans login)")
 
     if settings.yt_targets:
         yt_client = YouTubeRSS()

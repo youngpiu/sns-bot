@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from sessions import FansSessionStore
+
 
 logger = logging.getLogger(__name__)
 
@@ -148,14 +150,17 @@ def confirm_login(email: str, code: str, client_uuid: str, guid: str) -> tuple[s
 
 
 class FansAuth:
-    def __init__(self, token: str, client_uuid: str | None = None, guid: str | None = None, refresh_token: str | None = None) -> None:
-        import uuid
-        self._token = token
-        self._refresh_token = refresh_token
-        self._guid = guid or str(uuid.uuid4())
+    def __init__(self, session: FansSessionStore) -> None:
+        if not session.token:
+            raise FansAuthError("No token in Fans session. Run: python -m providers.fans login")
+        self._session = session
+        self._token = session.token
+        self._refresh_token = session.refresh_token
+        self._guid = session.ensure_guid()
         self._decoded: dict[str, Any] = {}
         self._decode_token()
-        self._client_uuid = self._decoded.get("ucu", client_uuid) or f"web-{uuid.uuid4()}"
+        ucu = self._decoded.get("ucu")
+        self._client_uuid = session.ensure_client_uuid(ucu)
 
     def _decode_token(self) -> None:
         try:
@@ -212,10 +217,10 @@ class FansAuth:
                 err = data.get("error", "unknown") if isinstance(data, dict) else "unknown"
                 raise FansAuthError(f"Token refresh returned no accessToken (server: {err})")
 
+            new_refresh = (data or {}).get("refreshToken", self._refresh_token)
             self._token = new_token
-            new_refresh = (data or {}).get("refreshToken")
-            if new_refresh:
-                self._refresh_token = new_refresh
+            self._refresh_token = new_refresh
+            self._session.set_tokens(new_token, new_refresh)
             self._decode_token()
             logger.info("Fans JWT refreshed successfully")
             return self._token
@@ -237,15 +242,9 @@ class FansAuth:
 
 
 class FansClient:
-    def __init__(
-        self,
-        token: str,
-        client_uuid: str | None = None,
-        guid: str | None = None,
-        target_group: str = "",
-        refresh_token: str | None = None,
-    ) -> None:
-        self.auth = FansAuth(token, client_uuid, guid, refresh_token)
+    def __init__(self, session: FansSessionStore, target_group: str = "") -> None:
+        self.auth = FansAuth(session)
+        self._session = session
         self._target_group = self._resolve_group(target_group)
 
     @staticmethod
@@ -452,27 +451,28 @@ class FansClient:
 def main() -> None:
     import argparse
     import sys
-    from config import load_settings
-
-    config = load_settings()
+    import uuid
 
     parser = argparse.ArgumentParser(description="FANS provider utilities")
     sub = parser.add_subparsers(dest="command")
 
     login_parser = sub.add_parser("login", help="Login via email verification code")
-    login_parser.add_argument("--email", default=config.fans_email_user or "", help="Email address")
-    login_parser.add_argument("--guid", default="", help="j-guid (auto-generated if empty)")
-    login_parser.add_argument("--client-uuid", default="", help="j-client-uuid (auto-generated if empty)")
+    login_parser.add_argument("--email", default="", help="Email address")
 
     args = parser.parse_args()
 
     if args.command == "login":
         if not args.email:
-            print("Missing --email. Set FANS_EMAIL in .env or pass --email.")
+            existing = FansSessionStore().load()
+            args.email = existing.email or ""
+        if not args.email:
+            print("Usage: python -m providers.fans login --email your@email.com")
             sys.exit(1)
-        import uuid
-        guid = args.guid or str(uuid.uuid4())
-        client_uuid = args.client_uuid or f"web-{uuid.uuid4()}"
+
+        session = FansSessionStore().load()
+        guid = session.guid or str(uuid.uuid4())
+        client_uuid = session.client_uuid or f"web-{uuid.uuid4()}"
+
         print(f"Sending verification code to {args.email}...")
         ok = send_verification_code(args.email, guid)
         if not ok:
@@ -484,9 +484,16 @@ def main() -> None:
             print("No code entered")
             sys.exit(1)
         access_token, refresh_token = confirm_login(args.email, code, client_uuid, guid)
-        print("\n=== NEW TOKENS ===")
-        print(f"FANS_TOKEN={access_token}")
-        print(f"FANS_REFRESH_TOKEN={refresh_token}")
+
+        session = FansSessionStore()
+        session._token = access_token
+        session._refresh_token = refresh_token
+        session._client_uuid = client_uuid
+        session._guid = guid
+        session._email = args.email
+        session.save()
+        print(f"\nSaved to {session.path}")
+        print("Done! You can now run: python main.py")
 
 
 if __name__ == "__main__":
