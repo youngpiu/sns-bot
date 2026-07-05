@@ -30,6 +30,12 @@ class Settings:
     yt_targets: tuple[str, ...] = ()
     yt_thread_id: str | None = None
     ngrok_token: str | None = None
+    twitter_webhook_url: str | None = None
+    twitter_role_id: str | None = None
+    twitter_target: str | None = None
+    twitter_poll_interval: int = 300
+    twitter_thread_id: str | None = None
+    twitter_auth_token: str | None = None
 
 
 def load_settings() -> Settings:
@@ -93,6 +99,22 @@ def load_settings() -> Settings:
 
     ngrok_token = os.getenv("NGROK_TOKEN", "").strip() or None
 
+    twitter_webhook_url = os.getenv("TWITTER_WEBHOOK", "").strip() or None
+    twitter_role_id = os.getenv("TWITTER_ROLE", "").strip() or None
+    twitter_target = os.getenv("TWITTER_TARGET", "").strip() or None
+
+    twitter_poll_interval_raw = os.getenv("TWITTER_POLL_INTERVAL", "300").strip()
+    try:
+        twitter_poll_interval = int(twitter_poll_interval_raw)
+    except ValueError as exc:
+        raise ValueError("TWITTER_POLL_INTERVAL must be an integer number of seconds") from exc
+
+    if twitter_poll_interval < 10:
+        raise ValueError("TWITTER_POLL_INTERVAL must be at least 10 seconds")
+
+    twitter_thread_id = os.getenv("TWITTER_THREAD_ID", "").strip() or None
+    twitter_auth_token = os.getenv("TWITTER_AUTH_TOKEN", "").strip() or None
+
     return Settings(
         webhook_url=webhook_url,
         role_id=role_id,
@@ -111,4 +133,10 @@ def load_settings() -> Settings:
         yt_targets=yt_targets,
         yt_thread_id=yt_thread_id,
         ngrok_token=ngrok_token,
+        twitter_webhook_url=twitter_webhook_url,
+        twitter_role_id=twitter_role_id,
+        twitter_target=twitter_target,
+        twitter_poll_interval=twitter_poll_interval,
+        twitter_thread_id=twitter_thread_id,
+        twitter_auth_token=twitter_auth_token,
     )

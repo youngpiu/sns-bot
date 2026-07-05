@@ -10,6 +10,7 @@ STATES_DIR = BASE_DIR / "states"
 IG_STATE_FILE = STATES_DIR / "ig_state.json"
 FANS_STATE_FILE = STATES_DIR / "fans_state.json"
 YT_STATE_FILE = STATES_DIR / "yt_state.json"
+TWITTER_STATE_FILE = STATES_DIR / "twitter_state.json"
 
 
 class InstagramStateStore:
@@ -137,6 +138,50 @@ class YouTubeStateStore:
 
     def mark_seen(self, video_id: str) -> None:
         self._last_seen_id = video_id
+
+    def is_initialized(self) -> bool:
+        return self._last_seen_id is not None
+
+    @property
+    def last_seen_id(self) -> str | None:
+        return self._last_seen_id
+
+
+class TwitterStateStore:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._last_seen_id: str | None = None
+
+    def load(self) -> TwitterStateStore:
+        if self.path.exists():
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                self._last_seen_id = str(data["last_seen_id"]) if data.get("last_seen_id") else None
+            except (OSError, json.JSONDecodeError):
+                self._last_seen_id = None
+        return self
+
+    def save(self) -> None:
+        payload = {"last_seen_id": self._last_seen_id}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        with NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=self.path.parent,
+            delete=False,
+        ) as temp_file:
+            json.dump(payload, temp_file, ensure_ascii=False, indent=2)
+            temp_file.write("\n")
+            temp_path = Path(temp_file.name)
+
+        temp_path.replace(self.path)
+
+    def is_new(self, tweet_id: str) -> bool:
+        return True
+
+    def mark_seen(self, tweet_id: str) -> None:
+        self._last_seen_id = tweet_id
 
     def is_initialized(self) -> bool:
         return self._last_seen_id is not None
