@@ -15,7 +15,8 @@ from pyngrok import ngrok
 from ytnoti import AsyncYouTubeNotifier
 from ytnoti.models.video import Video
 
-from config import load_settings
+from config import BASE_DIR, load_settings
+from providers import translator
 from providers.fans import FansClient, FansNotification, FansAuthError, FansAPIError
 from providers.ig import InstagramClient, InstagramLoginError, InstagramMedia
 from providers.fans import FansSessionStore
@@ -36,8 +37,9 @@ class DiscordWebhookError(RuntimeError):
     pass
 
 
-def build_discord_payload(role_id: str, media: InstagramMedia) -> dict[str, object]:
-    caption = media.caption_text.strip() or "(no caption)"
+async def build_discord_payload(role_id: str, media: InstagramMedia) -> dict[str, object]:
+    raw = media.caption_text.strip()
+    caption = await translator.translate(raw) if raw else "(no caption)"
     return {
         "content": f"```{caption}```\n<@&{role_id}>",
         "allowed_mentions": {
@@ -60,13 +62,14 @@ def build_discord_payload(role_id: str, media: InstagramMedia) -> dict[str, obje
     }
 
 
-def build_fans_discord_payload(
+async def build_fans_discord_payload(
     role_id: str,
     notif: FansNotification,
     body: str | None = None,
 ) -> dict[str, object]:
-    content = body or notif.message or "(no message)"
-    caption = content.strip()[:2000] or "(no message)"
+    raw = (body or notif.message or "").strip()
+    content = await translator.translate(raw) if raw else "(no message)"
+    caption = content[:2000] or "(no message)"
     return {
         "content": f"```{caption}```\n<@&{role_id}>",
         "allowed_mentions": {
@@ -89,8 +92,9 @@ def build_fans_discord_payload(
     }
 
 
-def build_twitter_discord_payload(role_id: str, tweet: TwitterTweet) -> dict[str, object]:
-    text = tweet.text.strip()[:2000] or "(no content)"
+async def build_twitter_discord_payload(role_id: str, tweet: TwitterTweet) -> dict[str, object]:
+    raw = tweet.text.strip()
+    text = (await translator.translate(raw))[:2000] if raw else "(no content)"
     return {
         "content": f"```{text}```\n<@&{role_id}>",
         "allowed_mentions": {
@@ -113,8 +117,9 @@ def build_twitter_discord_payload(role_id: str, tweet: TwitterTweet) -> dict[str
     }
 
 
-def build_yt_discord_payload(role_id: str, video: YouTubeVideo) -> dict[str, object]:
-    title = video.title.strip()[:2000] or "(no title)"
+async def build_yt_discord_payload(role_id: str, video: YouTubeVideo) -> dict[str, object]:
+    raw = video.title.strip()
+    title = (await translator.translate(raw))[:2000] if raw else "(no title)"
     return {
         "content": f"```{title}```\n<@&{role_id}>",
         "allowed_mentions": {
@@ -400,7 +405,7 @@ async def poll_instagram(
                     media.media_type,
                     media.product_type,
                 )
-                payload = build_discord_payload(role_id, media)
+                payload = await build_discord_payload(role_id, media)
                 temp_dir: Path | None = None
                 try:
                     temp_dir, attachment_paths = await asyncio.to_thread(download_media_files, media)
@@ -515,7 +520,7 @@ async def poll_fans(
                         else:
                             paths = []
 
-                        payload = build_fans_discord_payload(role_id, notif, body)
+                        payload = await build_fans_discord_payload(role_id, notif, body)
                         base_url = f"{webhook_url}?wait=true&with_components=true"
                         send_tasks = [
                             asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
@@ -602,7 +607,7 @@ async def poll_twitter(
                     tweet.id,
                     len(tweet.media_urls),
                 )
-                payload = build_twitter_discord_payload(role_id, tweet)
+                payload = await build_twitter_discord_payload(role_id, tweet)
                 temp_dir: Path | None = None
                 try:
                     if tweet.media_urls:
@@ -662,8 +667,9 @@ async def _handle_yt_video(
 
     logger.info("Video YouTube mới: id=%s title=%s channel=%s", video.id, video.title[:80], video.channel.name)
 
+    yt_title = await translator.translate(video.title)
     payload = {
-        "content": f"```{video.title[:2000]}```\n<@&{role_id}>",
+        "content": f"```{yt_title[:2000]}```\n<@&{role_id}>",
         "allowed_mentions": {"parse": [], "roles": [role_id]},
         "components": [
             {
@@ -707,6 +713,7 @@ async def _handle_yt_video(
 
 
 async def run_all(settings) -> None:
+    translator.init(settings.gemini_api_key, BASE_DIR / "prompt.txt")
     tasks = []
 
     ig_client = InstagramClient(
