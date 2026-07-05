@@ -1,16 +1,11 @@
-import asyncio
 import sys
 import uuid
 
 from providers.fans import FansSessionStore
 from providers.fans import send_verification_code, confirm_login
-try:
-    from tweety import TwitterAsync
-except ImportError:
-    TwitterAsync = None
 
 
-def _login_fans() -> None:
+def login() -> None:
     session = FansSessionStore().load()
 
     email = session.email
@@ -44,39 +39,6 @@ def _login_fans() -> None:
     session.save()
     print(f"\nĐã lưu vào {session.path}")
     print("Xong! Chạy: python main.py")
-
-
-def _login_twitter() -> None:
-    if TwitterAsync is None:
-        print("Tweety chưa được cài đặt. Chạy: pip install tweety-ns")
-        sys.exit(1)
-
-    session_name = "sessions/twitter_session"
-
-    async def _login():
-        app = TwitterAsync(session_name)
-        print("Đang mở trình duyệt để đăng nhập Twitter...")
-        print("Sau khi đăng nhập xong, nhấn Enter để tiếp tục.")
-        await app.start()
-        print(f"Đã lưu session vào {session_name}.tw_session")
-        print("Xong! Chạy: python main.py")
-
-    asyncio.run(_login())
-
-
-def login() -> None:
-    print("Chọn provider để đăng nhập:")
-    print("  1. Fans")
-    print("  2. Twitter")
-    choice = input("Nhập số (1 hoặc 2): ").strip()
-
-    if choice == "1":
-        _login_fans()
-    elif choice == "2":
-        _login_twitter()
-    else:
-        print("Lựa chọn không hợp lệ")
-        sys.exit(1)
 
 
 if __name__ == "__main__":
