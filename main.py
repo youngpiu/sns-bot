@@ -27,7 +27,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
-for noisy in ("instagrapi", "private_request", "pyngrok"):
+for noisy in ("instagrapi", "private_request", "pyngrok", "httpx"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
