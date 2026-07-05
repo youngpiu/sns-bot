@@ -637,7 +637,7 @@ async def poll_twitter(
                 state_store.save()
                 logger.info("Đã gửi Discord webhook cho Twitter tweet %s", tweet.id)
         except Exception:
-            logger.warning("Twitter lỗi, dừng task")
+            logger.warning("Twitter lỗi, dừng task", exc_info=True)
             return
 
         await asyncio.sleep(interval_seconds)

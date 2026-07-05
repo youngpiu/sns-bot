@@ -8,8 +8,10 @@ from config import BASE_DIR
 
 try:
     from tweety import TwitterAsync
+    import tweety.transaction as tweety_tx
 except ImportError:
     TwitterAsync = None
+    tweety_tx = None
 
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,30 @@ class TwitterTweet:
     media_urls: list[str]
 
 
+# ---------------------------------------------------------------------------
+# Monkey-patch TransactionGenerator so it doesn't crash on HTML parsing
+# ---------------------------------------------------------------------------
+if tweety_tx is not None:
+
+    _orig_tx_init = tweety_tx.TransactionGenerator.__init__
+
+    def _patched_tx_init(self, home_page_html):
+        try:
+            _orig_tx_init(self, home_page_html)
+        except Exception:
+            import base64
+            import math
+            import random
+
+            self.DEFAULT_ROW_INDEX = 0
+            self.DEFAULT_KEY_BYTES_INDICES = [0, 1, 2]
+            self.key = "AAAA"
+            self.key_bytes = list(base64.b64decode(b"AAAA"))
+            self.animation_key = "0" * 64
+
+    tweety_tx.TransactionGenerator.__init__ = _patched_tx_init
+
+
 class TwitterClient:
     def __init__(
         self,
@@ -50,11 +76,14 @@ class TwitterClient:
 
         try:
             await self.app.connect()
-            self._authenticated = True
-            logger.info("Đã tải Twitter session từ %s.tw_session", TWITTER_SESSION_FILE)
-            return
+            if self.app.user is not None:
+                self._authenticated = True
+                logger.info("Đã tải Twitter session từ %s.tw_session", TWITTER_SESSION_FILE)
+                return
         except Exception:
-            logger.info("Không tìm thấy Twitter session, thử auth_token...")
+            pass
+
+        logger.info("Không tìm thấy Twitter session, thử auth_token...")
 
         if self.auth_token:
             try:
@@ -65,21 +94,16 @@ class TwitterClient:
             except Exception as exc:
                 raise TwitterLoginError(f"Twitter auth_token thất bại: {exc}") from exc
 
-        raise TwitterLoginError(f"Twitter chưa được xác thực. Chạy: python -m login")
+        raise TwitterLoginError(f"Twitter chưa được xác thực")
 
     async def recent_tweets(self) -> list[TwitterTweet]:
         await self.authenticate()
 
-        tweets_data = await self.app.get_tweets(self.target_username, replies=False)
+        user_id = await self.app.get_user_id(self.target_username)
+        await self.app.enable_user_notification(user_id)
 
-        tweets: list[TwitterTweet] = []
-        for item in tweets_data:
-            if hasattr(item, "tweets"):
-                for t in item.tweets:
-                    tweets.append(t)
-            elif hasattr(item, "id"):
-                tweets.append(item)
-
+        notifications = await self.app.get_tweet_notifications(pages=1)
+        tweets = [t for t in notifications if str(t.author.id) == str(user_id)]
         tweets = [t for t in tweets if not getattr(t, "is_retweet", False)]
 
         result: list[TwitterTweet] = []
