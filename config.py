@@ -28,8 +28,8 @@ class Settings:
     yt_webhook_url: str | None = None
     yt_role_id: str | None = None
     yt_targets: tuple[str, ...] = ()
-    yt_poll_interval: int = 300
     yt_thread_id: str | None = None
+    ngrok_token: str | None = None
 
 
 def load_settings() -> Settings:
@@ -89,16 +89,9 @@ def load_settings() -> Settings:
     if yt_targets_raw:
         yt_targets = tuple(t.strip() for t in yt_targets_raw.split(",") if t.strip())
 
-    yt_poll_interval_raw = os.getenv("YT_POLL_INTERVAL", "300").strip()
-    try:
-        yt_poll_interval = int(yt_poll_interval_raw)
-    except ValueError as exc:
-        raise ValueError("YT_POLL_INTERVAL must be an integer number of seconds") from exc
-
-    if yt_poll_interval < 10:
-        raise ValueError("YT_POLL_INTERVAL must be at least 10 seconds")
-
     yt_thread_id = os.getenv("YT_THREAD_ID", "").strip() or None
+
+    ngrok_token = os.getenv("NGROK_TOKEN", "").strip() or None
 
     return Settings(
         webhook_url=webhook_url,
@@ -116,6 +109,6 @@ def load_settings() -> Settings:
         yt_webhook_url=yt_webhook_url,
         yt_role_id=yt_role_id,
         yt_targets=yt_targets,
-        yt_poll_interval=yt_poll_interval,
         yt_thread_id=yt_thread_id,
+        ngrok_token=ngrok_token,
     )

@@ -11,10 +11,13 @@ from urllib.parse import urlparse, urljoin
 
 import requests
 
+from pyngrok import ngrok
+from ytnoti import AsyncYouTubeNotifier
+from ytnoti.models.video import Video
+
 from config import load_settings
 from providers.fans import FansClient, FansNotification, FansAuthError, FansAPIError
 from providers.ig import InstagramClient, InstagramLoginError, InstagramMedia
-from providers.yt import YouTubeRSS, YouTubeVideo
 from sessions import FansSessionStore
 from state import IG_STATE_FILE, FANS_STATE_FILE, YT_STATE_FILE, FansStateStore, InstagramStateStore, YouTubeStateStore
 
@@ -524,93 +527,67 @@ async def poll_fans(
         await asyncio.sleep(interval_seconds)
 
 
-async def poll_youtube(
-    rss_client: YouTubeRSS,
-    state_store: YouTubeStateStore,
+def _normalize_channel_id(cid: str) -> str:
+    cid = cid.strip()
+    if cid.startswith("UU"):
+        return "UC" + cid[2:]
+    return cid
+
+
+async def _handle_yt_video(
+    video: Video,
     webhook_url: str,
     role_id: str,
-    channel_ids: list[str],
-    interval_seconds: int,
-    thread_id: str | None = None,
+    thread_id: str | None,
+    state_store: YouTubeStateStore,
 ) -> None:
-    state_store.load()
-    logger.info(
-        "Bắt đầu poll YouTube cho %s kênh, chu kỳ %s giây",
-        len(channel_ids), interval_seconds,
-    )
+    if video.id == state_store.last_seen_id:
+        return
 
-    while True:
-        try:
-            for channel_id in channel_ids:
-                videos = await asyncio.to_thread(rss_client.fetch_channel, channel_id)
-                if not videos:
-                    continue
+    logger.info("Video YouTube mới: id=%s title=%s channel=%s", video.id, video.title[:80], video.channel.name)
 
-                if not state_store.is_initialized():
-                    state_store.mark_seen(videos[0].video_id)
-                    state_store.save()
-                    logger.info(
-                        "Đã khởi tạo state YouTube với video mới nhất %s cho kênh %s",
-                        videos[0].video_id, channel_id,
-                    )
-                    continue
+    payload = {
+        "content": f"```{video.title[:2000]}```\n<@&{role_id}>",
+        "allowed_mentions": {"parse": [], "roles": [role_id]},
+        "components": [
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "style": 5,
+                        "label": "Xem trên YouTube",
+                        "url": video.url,
+                    }
+                ],
+            }
+        ],
+    }
 
-                new_videos: list[YouTubeVideo] = []
-                for v in videos:
-                    if v.video_id == state_store.last_seen_id:
-                        break
-                    new_videos.append(v)
+    temp_dir: Path | None = None
+    try:
+        temp_dir, paths = await asyncio.to_thread(_download_yt_thumbnail, video.id)
+        base_url = f"{webhook_url}?wait=true&with_components=true"
+        send_tasks = [
+            asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
+        ]
+        if thread_id:
+            thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
+            thread_payload = _without_role_mention(payload, role_id)
+            send_tasks.append(
+                asyncio.to_thread(send_discord_webhook, thread_url, thread_payload, paths),
+            )
+        await asyncio.gather(*send_tasks)
+    except DiscordWebhookError as exc:
+        logger.error("Gửi Discord webhook thất bại: %s", exc)
+        return
+    finally:
+        if temp_dir is not None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
-                if not new_videos:
-                    logger.info("Không có video YouTube mới cho kênh %s", channel_id)
-                else:
-                    logger.info(
-                        "Tìm thấy %s video YouTube mới cho kênh %s",
-                        len(new_videos), channel_id,
-                    )
-
-                for video in new_videos:
-                        logger.info(
-                            "Video YouTube mới: id=%s title=%s channel=%s",
-                            video.video_id, video.title[:80], video.channel_name,
-                        )
-                        payload = build_yt_discord_payload(role_id, video)
-                        temp_dir: Path | None = None
-                        try:
-                            temp_dir, paths = await asyncio.to_thread(
-                                _download_yt_thumbnail, video.video_id,
-                            )
-
-                            base_url = f"{webhook_url}?wait=true&with_components=true"
-                            send_tasks = [
-                                asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
-                            ]
-                            if thread_id:
-                                thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
-                                thread_payload = _without_role_mention(payload, role_id)
-                                send_tasks.append(
-                                    asyncio.to_thread(
-                                        send_discord_webhook, thread_url, thread_payload, paths,
-                                    ),
-                                )
-                            await asyncio.gather(*send_tasks)
-                        except DiscordWebhookError as exc:
-                            logger.error("Gửi Discord webhook thất bại: %s", exc)
-                            continue
-                        finally:
-                            if temp_dir is not None:
-                                shutil.rmtree(temp_dir, ignore_errors=True)
-
-                        state_store.mark_seen(video.video_id)
-                        state_store.save()
-                        logger.info("Đã gửi Discord webhook cho YouTube video %s", video.video_id)
-
-        except requests.RequestException as exc:
-            logger.error("Lấy YouTube RSS thất bại: %s", exc)
-        except Exception:
-            logger.exception("Chu kỳ poll YouTube thất bại")
-
-        await asyncio.sleep(interval_seconds)
+    state_store.mark_seen(video.id)
+    state_store.save()
+    logger.info("Đã gửi Discord webhook cho YouTube video %s", video.id)
 
 
 async def run_all(settings) -> None:
@@ -660,26 +637,28 @@ async def run_all(settings) -> None:
         else:
             logger.info("Không tìm thấy Fans session, bỏ qua poll Fans (chạy: python -m login)")
 
-    if settings.yt_targets:
-        yt_client = YouTubeRSS()
+    if settings.yt_targets and settings.ngrok_token:
+        ngrok.set_auth_token(settings.ngrok_token)
+        notifier = AsyncYouTubeNotifier()
+        yt_state = YouTubeStateStore(YT_STATE_FILE).load()
         yt_webhook = settings.yt_webhook_url or settings.webhook_url
         yt_role = settings.yt_role_id or settings.role_id
-        yt_state = YouTubeStateStore(YT_STATE_FILE)
-        tasks.append(
-            poll_youtube(
-                rss_client=yt_client,
-                state_store=yt_state,
-                webhook_url=yt_webhook,
-                role_id=yt_role,
-                channel_ids=list(settings.yt_targets),
-                interval_seconds=settings.yt_poll_interval,
-                thread_id=settings.yt_thread_id,
-            )
-        )
-    else:
-        logger.info("Không có YouTube targets, bỏ qua poll YouTube")
 
-    await asyncio.gather(*tasks)
+        @notifier.upload()
+        async def on_yt_upload(video: Video) -> None:
+            await _handle_yt_video(video, yt_webhook, yt_role, settings.yt_thread_id, yt_state)
+
+        logger.info("Bắt đầu YouTube notifier với %s kênh", len(settings.yt_targets))
+        channel_ids = [_normalize_channel_id(c) for c in settings.yt_targets]
+        async with notifier.run_in_background():
+            await notifier.subscribe(channel_ids)
+            await asyncio.gather(*tasks)
+    elif settings.yt_targets:
+        logger.warning("Cần NGROK_TOKEN để dùng YouTube push notification")
+        await asyncio.gather(*tasks)
+    else:
+        logger.info("Không có YouTube targets, bỏ qua")
+        await asyncio.gather(*tasks)
 
 
 def main() -> None:

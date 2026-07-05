@@ -1,3 +1,7 @@
 instagrapi>=2.1.3
 python-dotenv>=1.0.1
 requests>=2.32.0
+ytnoti>=3.0.0
+pyngrok>=7.0.0
+pillow-heif>=0.18.0
+Pillow>=10.0.0
