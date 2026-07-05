@@ -3,9 +3,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
-state.json
-fans_state.json
-instagram_session.json
 *.log
-sessions/fans_session.json
-sessions/tmp*
+sessions/
+states/

@@ -280,7 +280,7 @@ def send_discord_webhook(
 ) -> None:
     chunks = [
         attachment_paths[i : i + MAX_FILES_PER_WEBHOOK]
-        for i in range(0, len(attachment_paths), MAX_FILES_PER_WEBHOOK)
+        for i in range(0, max(len(attachment_paths), 1), MAX_FILES_PER_WEBHOOK)
     ]
 
     has_components = bool(payload.get("components"))
