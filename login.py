@@ -10,33 +10,7 @@ except ImportError:
     TwitterAsync = None
 
 
-def login() -> None:
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Interactive login cho các provider")
-    sub = parser.add_subparsers(dest="provider")
-    sub.add_parser("twitter", help="Đăng nhập Twitter (mở trình duyệt)")
-
-    args = parser.parse_args()
-
-    if args.provider == "twitter":
-        if TwitterAsync is None:
-            print("Tweety chưa được cài đặt. Chạy: pip install tweety-ns")
-            sys.exit(1)
-
-        session_name = "sessions/twitter_session"
-
-        async def _login():
-            app = TwitterAsync(session_name)
-            print("Đang mở trình duyệt để đăng nhập Twitter...")
-            print("Sau khi đăng nhập xong, nhấn Enter để tiếp tục.")
-            await app.start()
-            print(f"Đã lưu session vào {session_name}.tw_session")
-            print("Xong! Chạy: python main.py")
-
-        asyncio.run(_login())
-        return
-
+def _login_fans() -> None:
     session = FansSessionStore().load()
 
     email = session.email
@@ -70,6 +44,39 @@ def login() -> None:
     session.save()
     print(f"\nĐã lưu vào {session.path}")
     print("Xong! Chạy: python main.py")
+
+
+def _login_twitter() -> None:
+    if TwitterAsync is None:
+        print("Tweety chưa được cài đặt. Chạy: pip install tweety-ns")
+        sys.exit(1)
+
+    session_name = "sessions/twitter_session"
+
+    async def _login():
+        app = TwitterAsync(session_name)
+        print("Đang mở trình duyệt để đăng nhập Twitter...")
+        print("Sau khi đăng nhập xong, nhấn Enter để tiếp tục.")
+        await app.start()
+        print(f"Đã lưu session vào {session_name}.tw_session")
+        print("Xong! Chạy: python main.py")
+
+    asyncio.run(_login())
+
+
+def login() -> None:
+    print("Chọn provider để đăng nhập:")
+    print("  1. Fans")
+    print("  2. Twitter")
+    choice = input("Nhập số (1 hoặc 2): ").strip()
+
+    if choice == "1":
+        _login_fans()
+    elif choice == "2":
+        _login_twitter()
+    else:
+        print("Lựa chọn không hợp lệ")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
