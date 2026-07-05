@@ -66,10 +66,13 @@ async def build_fans_discord_payload(
     role_id: str,
     notif: FansNotification,
     body: str | None = None,
+    author: str | None = None,
 ) -> dict[str, object]:
     raw = (body or notif.message or "").strip()
     content = await translator.translate(raw) if raw else "(no message)"
     caption = content[:2000] or "(no message)"
+    if author:
+        caption = f"{author}: {caption}"
     return {
         "content": f"```{caption}```\n<@&{role_id}>",
         "allowed_mentions": {
@@ -493,6 +496,7 @@ async def poll_fans(
 
                     body = None
                     post_time = None
+                    author: str | None = None
                     attachment_urls: list[str] = []
                     if slug:
                         try:
@@ -500,6 +504,11 @@ async def poll_fans(
                             if post:
                                 body = post.get("body")
                                 post_time = post.get("firstActivatedAt")
+                                member = post.get("member") or {}
+                                artist = member.get("artist") or {}
+                                code = artist.get("code", "")
+                                if code:
+                                    author = code[0].upper() + code[1:]
                                 atts = post.get("attachments") or []
                                 for a in atts:
                                     u = a.get("url")
@@ -520,7 +529,7 @@ async def poll_fans(
                         else:
                             paths = []
 
-                        payload = await build_fans_discord_payload(role_id, notif, body)
+                        payload = await build_fans_discord_payload(role_id, notif, body, author)
                         base_url = f"{webhook_url}?wait=true&with_components=true"
                         send_tasks = [
                             asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
@@ -743,59 +752,59 @@ async def run_all(settings) -> None:
             fans_client = None
             fans_session = FansSessionStore()
         if fans_client is not None:
-            fans_state = FansStateStore(FANS_STATE_FILE).load()
-            fans_webhook = settings.fans_webhook_url or settings.webhook_url
-            fans_role = settings.fans_role_id or settings.role_id
-            tasks.append(
-                poll_fans(
-                    fans=fans_client,
-                    state_store=fans_state,
-                    webhook_url=fans_webhook,
-                    role_id=fans_role,
-                    target_group=settings.fans_target,
-                    interval_seconds=settings.fans_poll_interval,
-                    thread_id=settings.fans_thread_id,
+            if not settings.fans_webhook_url or not settings.fans_role_id:
+                logger.warning("Thiếu FANS_WEBHOOK hoặc FANS_ROLE trong .env — bỏ qua Fans")
+            else:
+                fans_state = FansStateStore(FANS_STATE_FILE).load()
+                tasks.append(
+                    poll_fans(
+                        fans=fans_client,
+                        state_store=fans_state,
+                        webhook_url=settings.fans_webhook_url,
+                        role_id=settings.fans_role_id,
+                        target_group=settings.fans_target,
+                        interval_seconds=settings.fans_poll_interval,
+                        thread_id=settings.fans_thread_id,
+                    )
                 )
-            )
         else:
             logger.info("Không tìm thấy Fans session, bỏ qua poll Fans (chạy: python -m login)")
 
     if settings.yt_targets:
-        yt_state = YouTubeStateStore(YT_STATE_FILE).load()
-        yt_webhook = settings.yt_webhook_url or settings.webhook_url
-        yt_role = settings.yt_role_id or settings.role_id
-
-        if settings.ngrok_token:
+        if not settings.yt_webhook_url or not settings.yt_role_id:
+            logger.warning("Thiếu YT_WEBHOOK hoặc YT_ROLE trong .env — bỏ qua YouTube")
+        elif not settings.ngrok_token:
+            logger.warning("Cần NGROK_TOKEN để dùng YouTube push notification — bỏ qua YouTube")
+        else:
+            yt_state = YouTubeStateStore(YT_STATE_FILE).load()
             tasks.append(
                 _yt_push_notifier(
                     ngrok_token=settings.ngrok_token,
                     yt_targets=settings.yt_targets,
-                    yt_webhook=yt_webhook,
-                    yt_role=yt_role,
+                    yt_webhook=settings.yt_webhook_url,
+                    yt_role=settings.yt_role_id,
                     yt_thread_id=settings.yt_thread_id,
                     yt_state=yt_state,
                 )
             )
-        else:
-            logger.warning("Cần NGROK_TOKEN để dùng YouTube push notification — bỏ qua YouTube")
 
     if settings.twitter_target:
         if not settings.twitter_auth_token:
             logger.warning("Cần TWITTER_AUTH_TOKEN trong .env để dùng Twitter — bỏ qua")
+        elif not settings.twitter_webhook_url or not settings.twitter_role_id:
+            logger.warning("Thiếu TWITTER_WEBHOOK hoặc TWITTER_ROLE trong .env — bỏ qua Twitter")
         else:
             twitter_client = TwitterClient(
                 target_username=settings.twitter_target,
                 auth_token=settings.twitter_auth_token,
             )
             twitter_state = TwitterStateStore(TWITTER_STATE_FILE).load()
-            twitter_webhook = settings.twitter_webhook_url or settings.webhook_url
-            twitter_role = settings.twitter_role_id or settings.role_id
             tasks.append(
                 poll_twitter(
                     twitter=twitter_client,
                     state_store=twitter_state,
-                    webhook_url=twitter_webhook,
-                    role_id=twitter_role,
+                    webhook_url=settings.twitter_webhook_url,
+                    role_id=settings.twitter_role_id,
                     target_username=settings.twitter_target,
                     interval_seconds=settings.twitter_poll_interval,
                     thread_id=settings.twitter_thread_id,
