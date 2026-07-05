@@ -222,7 +222,7 @@ class FansAuth:
             self._refresh_token = new_refresh
             self._session.set_tokens(new_token, new_refresh)
             self._decode_token()
-            logger.info("Fans JWT refreshed successfully")
+            logger.info("Fans JWT đã refresh thành công")
             return self._token
         except FansAuthError:
             raise
@@ -232,12 +232,12 @@ class FansAuth:
     def ensure_token(self) -> str:
         try:
             if self.is_expired():
-                logger.info("Fans JWT expired, refreshing...")
+                logger.info("Fans JWT hết hạn, đang refresh...")
                 return self.refresh()
             if self.should_refresh():
                 return self.refresh()
         except FansAuthError:
-            logger.warning("Fans JWT refresh failed, using current token")
+            logger.warning("Fans JWT refresh thất bại, dùng token hiện tại")
         return self._token
 
 
@@ -298,7 +298,7 @@ class FansClient:
                 conn.close()
 
                 if resp.status == 401 and attempt == 0:
-                    logger.info("Fans API returned 401, refreshing token and retrying...")
+                    logger.info("Fans API trả về 401, đang refresh token và thử lại...")
                     self.auth.refresh()
                     continue
 
@@ -441,7 +441,7 @@ class FansClient:
         result = [n for n in result if n.category in NOTIFICATION_CATEGORIES]
         result.sort(key=lambda n: n.created_at, reverse=True)
         logger.info(
-            "Resolved %s Fans notification(s) for %s",
+            "Tìm thấy %s thông báo Fans cho %s",
             len(result),
             self._target_group["name"],
         )
@@ -457,17 +457,19 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     login_parser = sub.add_parser("login", help="Login via email verification code")
-    login_parser.add_argument("--email", default="", help="Email address")
+    login_parser.add_argument("--email", default=None, nargs="?", help="Email address (optional, prompts if absent)")
 
     args = parser.parse_args()
 
     if args.command == "login":
         if not args.email:
             existing = FansSessionStore().load()
-            args.email = existing.email or ""
+            args.email = existing.email
         if not args.email:
-            print("Usage: python -m providers.fans login --email your@email.com")
-            sys.exit(1)
+            args.email = input("Email: ").strip()
+            if not args.email:
+                print("No email provided")
+                sys.exit(1)
 
         session = FansSessionStore().load()
         guid = session.guid or str(uuid.uuid4())

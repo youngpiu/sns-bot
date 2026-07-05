@@ -35,12 +35,12 @@ class YouTubeRSS:
     def _feed_url(channel_or_playlist_id: str) -> str:
         cid = channel_or_playlist_id.strip()
         if cid.startswith("UC"):
-            return f"{RSS_BASE}?channel_id={cid}"
+            cid = "UU" + cid[2:]
         return f"{RSS_BASE}?playlist_id={cid}"
 
     def fetch_channel(self, channel_id: str) -> list[YouTubeVideo]:
         url = self._feed_url(channel_id)
-        logger.info("Fetching YouTube RSS for %s", channel_id)
+        logger.info("Đang lấy YouTube RSS cho %s", channel_id)
         response = requests.get(url, timeout=30)
         response.raise_for_status()
 
@@ -85,7 +85,7 @@ class YouTubeRSS:
             ))
 
         logger.info(
-            "Found %s video(s) for channel %s (%s)",
+            "Tìm thấy %s video cho kênh %s (%s)",
             len(videos), channel_id, channel_name or "?",
         )
         return videos

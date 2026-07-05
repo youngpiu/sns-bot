@@ -140,10 +140,10 @@ def _convert_heic(path: Path) -> Path:
         new_path = path.with_suffix(".jpg")
         img.save(new_path, "JPEG", quality=95)
         path.unlink()
-        logger.info("Converted %s to %s", path.name, new_path.name)
+        logger.info("Đã chuyển %s sang %s", path.name, new_path.name)
         return new_path
     except Exception as exc:
-        logger.warning("Failed to convert HEIC %s: %s", path.name, exc)
+        logger.warning("Chuyển HEIC %s thất bại: %s", path.name, exc)
         return path
 
 
@@ -154,7 +154,7 @@ def _crop_black_bars(path: Path, threshold: int = 15) -> Path:
         img = Image.open(path)
         gray = img.convert("L")
         w, h = gray.size
-        pix = list(gray.getdata())
+        pix = gray.get_flattened_data()
 
         top = 0
         for y in range(h):
@@ -187,11 +187,11 @@ def _crop_black_bars(path: Path, threshold: int = 15) -> Path:
         cropped = img_rgb.crop((left, top, right, bottom))
         cropped.save(path, "JPEG", quality=95)
         logger.info(
-            "Cropped black bars from %s: %sx%s -> %sx%s",
+            "Đã cắt viền đen từ %s: %sx%s -> %sx%s",
             path.name, w, h, right - left, bottom - top,
         )
     except Exception as exc:
-        logger.warning("Failed to crop black bars for %s: %s", path.name, exc)
+        logger.warning("Cắt viền đen cho %s thất bại: %s", path.name, exc)
     return path
 
 
@@ -210,12 +210,12 @@ def _download_yt_thumbnail(video_id: str) -> tuple[Path, list[Path]]:
                         fh.write(chunk)
             output_path = _convert_heic(output_path)
             output_path = _crop_black_bars(output_path)
-            logger.info("Downloaded YouTube thumbnail %s for %s (size=%s)", size, video_id, output_path.stat().st_size)
+            logger.info("Đã tải YouTube thumbnail %s cho %s (dung lượng=%s)", size, video_id, output_path.stat().st_size)
             return temp_dir, [output_path]
         except Exception as exc:
-            logger.warning("YouTube thumbnail %s not available for %s: %s", size, video_id, exc)
+            logger.warning("YouTube thumbnail %s không có cho %s: %s", size, video_id, exc)
             continue
-    logger.warning("No YouTube thumbnail available for %s", video_id)
+    logger.warning("Không có YouTube thumbnail nào cho %s", video_id)
     shutil.rmtree(temp_dir, ignore_errors=True)
     return temp_dir, []
 
@@ -229,7 +229,7 @@ def download_urls(
     downloaded_files: list[Path] = []
 
     for index, url in enumerate(urls, start=1):
-        logger.info("Downloading file %s/%s for %s", index, len(urls), log_label)
+        logger.info("Đang tải file %s/%s cho %s", index, len(urls), log_label)
         try:
             response = requests.get(url, stream=True, timeout=60)
             response.raise_for_status()
@@ -245,7 +245,7 @@ def download_urls(
             output_path = _crop_black_bars(output_path)
             downloaded_files.append(output_path)
             logger.info(
-                "Downloaded file %s/%s for %s as %s (%s bytes)",
+                "Đã tải file %s/%s cho %s thành %s (%s bytes)",
                 index,
                 len(urls),
                 log_label,
@@ -253,7 +253,7 @@ def download_urls(
                 output_path.stat().st_size,
             )
         except Exception as exc:
-            logger.warning("Failed to download %s: %s", url, exc)
+            logger.warning("Tải %s thất bại: %s", url, exc)
             continue
 
     return temp_dir, downloaded_files
@@ -303,7 +303,7 @@ def send_discord_webhook(
             else:
                 chunk_payload = {"content": ""}
             logger.info(
-                "Sending Discord webhook chunk %s/%s with %s attachment(s)",
+                "Đang gửi Discord webhook chunk %s/%s với %s file đính kèm",
                 chunk_idx + 1,
                 len(chunks),
                 len(files),
@@ -318,7 +318,7 @@ def send_discord_webhook(
                     f"Discord webhook failed with status {response.status_code}: {response.text}"
                 )
             logger.info(
-                "Discord webhook chunk %s/%s accepted with status %s",
+                "Discord webhook chunk %s/%s đã gửi thành công (status %s)",
                 chunk_idx + 1,
                 len(chunks),
                 response.status_code,
@@ -338,19 +338,19 @@ async def poll_instagram(
     thread_id: str | None = None,
 ) -> None:
     state_store.load()
-    logger.info("Instagram polling started with %s second interval", interval_seconds)
+    logger.info("Bắt đầu poll Instagram, chu kỳ %s giây", interval_seconds)
 
     while True:
         try:
             recent_medias = await asyncio.to_thread(instagram.recent_medias)
             if not recent_medias:
-                logger.info("No Instagram media found for @%s", target_username)
+                logger.info("Không có media Instagram nào cho @%s", target_username)
                 continue
 
             if not state_store.is_initialized():
                 state_store.mark_seen(recent_medias[0].pk)
                 state_store.save()
-                logger.info("Initialized Instagram state with media pk=%s", state_store.last_seen_pk)
+                logger.info("Đã khởi tạo state Instagram với media pk=%s", state_store.last_seen_pk)
                 continue
 
             new_medias: list[InstagramMedia] = []
@@ -360,13 +360,13 @@ async def poll_instagram(
                 new_medias.append(media)
 
             if not new_medias:
-                logger.info("No new Instagram media for @%s", target_username)
+                logger.info("Không có media Instagram mới cho @%s", target_username)
             else:
-                logger.info("Found %s new Instagram media item(s) for @%s", len(new_medias), target_username)
+                logger.info("Tìm thấy %s media Instagram mới cho @%s", len(new_medias), target_username)
 
             for media in new_medias:
                 logger.info(
-                    "New Instagram media detected pk=%s url_count=%s type=%s product_type=%s",
+                    "Media Instagram mới: pk=%s url_count=%s type=%s product_type=%s",
                     media.pk,
                     len(media.media_urls),
                     media.media_type,
@@ -390,16 +390,16 @@ async def poll_instagram(
                 finally:
                     if temp_dir is not None:
                         shutil.rmtree(temp_dir, ignore_errors=True)
-                        logger.info("Cleaned temporary media files for pk=%s", media.pk)
+                        logger.info("Đã dọn file tạm cho pk=%s", media.pk)
                 state_store.mark_seen(media.pk)
                 state_store.save()
-                logger.info("Sent Discord webhook notification for Instagram media pk %s", media.pk)
+                logger.info("Đã gửi Discord webhook cho Instagram media pk %s", media.pk)
         except InstagramLoginError as exc:
-            logger.error("Instagram login failed: %s", exc)
+            logger.error("Đăng nhập Instagram thất bại: %s", exc)
         except DiscordWebhookError as exc:
-            logger.error("Discord webhook send failed: %s", exc)
+            logger.error("Gửi Discord webhook thất bại: %s", exc)
         except Exception:
-            logger.exception("Instagram polling cycle failed")
+            logger.exception("Chu kỳ poll Instagram thất bại")
 
         await asyncio.sleep(interval_seconds)
 
@@ -414,20 +414,20 @@ async def poll_fans(
     thread_id: str | None = None,
 ) -> None:
     state_store.load()
-    logger.info("Fans polling started for %s with %s second interval", target_group, interval_seconds)
+    logger.info("Bắt đầu poll Fans cho %s, chu kỳ %s giây", target_group, interval_seconds)
 
     while True:
         try:
             notifs = await asyncio.to_thread(fans.recent_notifications)
             if not notifs:
-                logger.info("No Fans notifications found for %s", target_group)
+                logger.info("Không có thông báo Fans nào cho %s", target_group)
                 continue
 
             if not state_store.is_initialized():
                 state_store.mark_seen(notifs[0].id)
                 state_store.save()
                 logger.info(
-                    "Initialized Fans state with newest notification %s for %s",
+                    "Đã khởi tạo state Fans với thông báo mới nhất %s cho %s",
                     notifs[0].id, target_group,
                 )
                 continue
@@ -439,13 +439,13 @@ async def poll_fans(
                 new_notifs.append(n)
 
             if not new_notifs:
-                logger.info("No new Fans notifications for %s", target_group)
+                logger.info("Không có thông báo Fans mới cho %s", target_group)
             else:
-                logger.info("Found %s new Fans notification(s) for %s", len(new_notifs), target_group)
+                logger.info("Tìm thấy %s thông báo Fans mới cho %s", len(new_notifs), target_group)
 
             for notif in new_notifs:
                     logger.info(
-                        "New Fans notification id=%s category=%s group=%s",
+                        "Thông báo Fans mới: id=%s category=%s group=%s",
                         notif.id,
                         notif.category,
                         notif.group_name,
@@ -473,7 +473,7 @@ async def poll_fans(
                                     if u:
                                         attachment_urls.append(u)
                         except Exception as exc:
-                            logger.warning("Failed to fetch Fans post detail for slug=%s: %s", slug, exc)
+                            logger.warning("Lấy chi tiết bài Fans slug=%s thất bại: %s", slug, exc)
 
                     temp_dir: Path | None = None
                     try:
@@ -500,7 +500,7 @@ async def poll_fans(
                             )
                         await asyncio.gather(*send_tasks)
                     except DiscordWebhookError as exc:
-                        logger.error("Discord webhook send failed: %s", exc)
+                        logger.error("Gửi Discord webhook thất bại: %s", exc)
                         continue
                     finally:
                         if temp_dir is not None:
@@ -509,17 +509,17 @@ async def poll_fans(
                     state_store.mark_seen(notif.id)
                     state_store.save()
                     logger.info(
-                        "Sent Discord webhook for Fans notification id=%s with %s attachment(s)",
+                        "Đã gửi Discord webhook cho Fans notification id=%s với %s file đính kèm",
                         notif.id,
                         len(attachment_urls),
                     )
 
         except FansAuthError as exc:
-            logger.error("Fans auth failed: %s", exc)
+            logger.error("Xác thực Fans thất bại: %s", exc)
         except FansAPIError as exc:
-            logger.error("Fans API error: %s", exc)
+            logger.error("Fans API lỗi: %s", exc)
         except Exception:
-            logger.exception("Fans polling cycle failed")
+            logger.exception("Chu kỳ poll Fans thất bại")
 
         await asyncio.sleep(interval_seconds)
 
@@ -535,7 +535,7 @@ async def poll_youtube(
 ) -> None:
     state_store.load()
     logger.info(
-        "YouTube polling started for %s channel(s) with %s second interval",
+        "Bắt đầu poll YouTube cho %s kênh, chu kỳ %s giây",
         len(channel_ids), interval_seconds,
     )
 
@@ -550,7 +550,7 @@ async def poll_youtube(
                     state_store.mark_seen(videos[0].video_id)
                     state_store.save()
                     logger.info(
-                        "Initialized YouTube state with newest video %s for channel %s",
+                        "Đã khởi tạo state YouTube với video mới nhất %s cho kênh %s",
                         videos[0].video_id, channel_id,
                     )
                     continue
@@ -562,16 +562,16 @@ async def poll_youtube(
                     new_videos.append(v)
 
                 if not new_videos:
-                    logger.info("No new YouTube videos for channel %s", channel_id)
+                    logger.info("Không có video YouTube mới cho kênh %s", channel_id)
                 else:
                     logger.info(
-                        "Found %s new YouTube video(s) for channel %s",
+                        "Tìm thấy %s video YouTube mới cho kênh %s",
                         len(new_videos), channel_id,
                     )
 
                 for video in new_videos:
                         logger.info(
-                            "New YouTube video id=%s title=%s channel=%s",
+                            "Video YouTube mới: id=%s title=%s channel=%s",
                             video.video_id, video.title[:80], video.channel_name,
                         )
                         payload = build_yt_discord_payload(role_id, video)
@@ -595,7 +595,7 @@ async def poll_youtube(
                                 )
                             await asyncio.gather(*send_tasks)
                         except DiscordWebhookError as exc:
-                            logger.error("Discord webhook send failed: %s", exc)
+                            logger.error("Gửi Discord webhook thất bại: %s", exc)
                             continue
                         finally:
                             if temp_dir is not None:
@@ -603,12 +603,12 @@ async def poll_youtube(
 
                         state_store.mark_seen(video.video_id)
                         state_store.save()
-                        logger.info("Sent Discord webhook for YouTube video %s", video.video_id)
+                        logger.info("Đã gửi Discord webhook cho YouTube video %s", video.video_id)
 
         except requests.RequestException as exc:
-            logger.error("YouTube RSS fetch failed: %s", exc)
+            logger.error("Lấy YouTube RSS thất bại: %s", exc)
         except Exception:
-            logger.exception("YouTube polling cycle failed")
+            logger.exception("Chu kỳ poll YouTube thất bại")
 
         await asyncio.sleep(interval_seconds)
 
@@ -658,7 +658,7 @@ async def run_all(settings) -> None:
                 )
             )
         else:
-            logger.info("Fans session not found, skipping Fans polling (run: python -m providers.fans login)")
+            logger.info("Không tìm thấy Fans session, bỏ qua poll Fans (chạy: python -m login)")
 
     if settings.yt_targets:
         yt_client = YouTubeRSS()
@@ -677,7 +677,7 @@ async def run_all(settings) -> None:
             )
         )
     else:
-        logger.info("YouTube targets not provided, skipping YouTube polling")
+        logger.info("Không có YouTube targets, bỏ qua poll YouTube")
 
     await asyncio.gather(*tasks)
 

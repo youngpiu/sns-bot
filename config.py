@@ -62,8 +62,8 @@ def load_settings() -> Settings:
     except ValueError as exc:
         raise ValueError("IG_POLL_INTERVAL must be an integer number of seconds") from exc
 
-    if poll_interval < 60:
-        raise ValueError("IG_POLL_INTERVAL must be at least 60 seconds")
+    if poll_interval < 10:
+        raise ValueError("IG_POLL_INTERVAL must be at least 10 seconds")
 
     fans_webhook_url = os.getenv("FANS_WEBHOOK", "").strip() or None
     fans_role_id = os.getenv("FANS_ROLE", "").strip() or None
@@ -75,8 +75,8 @@ def load_settings() -> Settings:
     except ValueError as exc:
         raise ValueError("FANS_POLL_INTERVAL must be an integer number of seconds") from exc
 
-    if fans_poll_interval < 30:
-        raise ValueError("FANS_POLL_INTERVAL must be at least 30 seconds")
+    if fans_poll_interval < 10:
+        raise ValueError("FANS_POLL_INTERVAL must be at least 10 seconds")
 
     ig_thread_id = os.getenv("IG_THREAD_ID", "").strip() or None
     fans_thread_id = os.getenv("FANS_THREAD_ID", "").strip() or None
@@ -95,8 +95,8 @@ def load_settings() -> Settings:
     except ValueError as exc:
         raise ValueError("YT_POLL_INTERVAL must be an integer number of seconds") from exc
 
-    if yt_poll_interval < 30:
-        raise ValueError("YT_POLL_INTERVAL must be at least 30 seconds")
+    if yt_poll_interval < 10:
+        raise ValueError("YT_POLL_INTERVAL must be at least 10 seconds")
 
     yt_thread_id = os.getenv("YT_THREAD_ID", "").strip() or None
 

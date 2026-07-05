@@ -84,13 +84,13 @@ class InstagramClient:
         if self.session_file.exists():
             try:
                 self.client.load_settings(str(self.session_file))
-                logger.info("Loaded Instagram session from %s", self.session_file)
+                logger.info("Đã tải Instagram session từ %s", self.session_file)
             except Exception:
-                logger.warning("Could not load Instagram session; continuing with password login")
+                logger.warning("Không tải được Instagram session; tiếp tục với password login")
 
         try:
             if self.sessionid:
-                logger.info("Attempting Instagram login with sessionid")
+                logger.info("Đang đăng nhập Instagram bằng sessionid")
                 self.client.login_by_sessionid(self.sessionid)
             else:
                 self.client.login(self.username, self.password)
@@ -127,7 +127,7 @@ class InstagramClient:
         self.session_file.parent.mkdir(parents=True, exist_ok=True)
         self.client.dump_settings(str(self.session_file))
         self._logged_in = True
-        logger.info("Instagram login completed")
+        logger.info("Đăng nhập Instagram hoàn tất")
 
     @staticmethod
     def _is_supported_profile_media(media: object) -> bool:
@@ -193,7 +193,7 @@ class InstagramClient:
         result = [self._to_instagram_media(media) for media in supported_medias]
         result.sort(key=lambda media: media.taken_at or datetime.min, reverse=True)
         logger.info(
-            "Resolved %s recent Instagram media candidate(s) for @%s",
+            "Tìm thấy %s media Instagram gần đây cho @%s",
             len(result),
             self.target_username,
         )
