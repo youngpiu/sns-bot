@@ -18,7 +18,7 @@ from ytnoti.models.video import Video
 from config import load_settings
 from providers.fans import FansClient, FansNotification, FansAuthError, FansAPIError
 from providers.ig import InstagramClient, InstagramLoginError, InstagramMedia
-from sessions import FansSessionStore
+from providers.fans import FansSessionStore
 from state import IG_STATE_FILE, FANS_STATE_FILE, YT_STATE_FILE, FansStateStore, InstagramStateStore, YouTubeStateStore
 
 

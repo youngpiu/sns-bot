@@ -1,7 +1,7 @@
 import sys
 import uuid
 
-from sessions import FansSessionStore
+from providers.fans import FansSessionStore
 from providers.fans import send_verification_code, confirm_login
 
 
