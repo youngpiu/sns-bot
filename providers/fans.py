@@ -148,13 +148,14 @@ def confirm_login(email: str, code: str, client_uuid: str, guid: str) -> tuple[s
 
 
 class FansAuth:
-    def __init__(self, token: str, client_uuid: str, guid: str, refresh_token: str | None = None) -> None:
+    def __init__(self, token: str, client_uuid: str | None = None, guid: str | None = None, refresh_token: str | None = None) -> None:
+        import uuid
         self._token = token
         self._refresh_token = refresh_token
-        self._guid = guid
+        self._guid = guid or str(uuid.uuid4())
         self._decoded: dict[str, Any] = {}
         self._decode_token()
-        self._client_uuid = self._decoded.get("ucu", client_uuid)
+        self._client_uuid = self._decoded.get("ucu", client_uuid) or f"web-{uuid.uuid4()}"
 
     def _decode_token(self) -> None:
         try:
@@ -239,9 +240,9 @@ class FansClient:
     def __init__(
         self,
         token: str,
-        client_uuid: str,
-        guid: str,
-        target_group: str,
+        client_uuid: str | None = None,
+        guid: str | None = None,
+        target_group: str = "",
         refresh_token: str | None = None,
     ) -> None:
         self.auth = FansAuth(token, client_uuid, guid, refresh_token)
@@ -451,20 +452,29 @@ class FansClient:
 def main() -> None:
     import argparse
     import sys
+    from config import load_settings
+
+    config = load_settings()
 
     parser = argparse.ArgumentParser(description="FANS provider utilities")
     sub = parser.add_subparsers(dest="command")
 
     login_parser = sub.add_parser("login", help="Login via email verification code")
-    login_parser.add_argument("--email", required=True, help="Email address")
-    login_parser.add_argument("--guid", required=True, help="j-guid (from .env FANS_GUID)")
-    login_parser.add_argument("--client-uuid", required=True, help="j-client-uuid (from .env FANS_CLIENT_UUID)")
+    login_parser.add_argument("--email", default=config.fans_email_user or "", help="Email address")
+    login_parser.add_argument("--guid", default="", help="j-guid (auto-generated if empty)")
+    login_parser.add_argument("--client-uuid", default="", help="j-client-uuid (auto-generated if empty)")
 
     args = parser.parse_args()
 
     if args.command == "login":
+        if not args.email:
+            print("Missing --email. Set FANS_EMAIL in .env or pass --email.")
+            sys.exit(1)
+        import uuid
+        guid = args.guid or str(uuid.uuid4())
+        client_uuid = args.client_uuid or f"web-{uuid.uuid4()}"
         print(f"Sending verification code to {args.email}...")
-        ok = send_verification_code(args.email, args.guid)
+        ok = send_verification_code(args.email, guid)
         if not ok:
             print("Failed to send verification code")
             sys.exit(1)
@@ -473,11 +483,10 @@ def main() -> None:
         if not code:
             print("No code entered")
             sys.exit(1)
-        access_token, refresh_token = confirm_login(args.email, code, args.client_uuid, args.guid)
+        access_token, refresh_token = confirm_login(args.email, code, client_uuid, guid)
         print("\n=== NEW TOKENS ===")
         print(f"FANS_TOKEN={access_token}")
         print(f"FANS_REFRESH_TOKEN={refresh_token}")
-        print("\nAdd these to your .env file.")
 
 
 if __name__ == "__main__":

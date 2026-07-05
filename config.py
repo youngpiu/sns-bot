@@ -26,6 +26,7 @@ class Settings:
     fans_guid: str | None = None
     fans_target: str | None = None
     fans_refresh_token: str | None = None
+    fans_email_user: str | None = None
     fans_poll_interval: int = 300
     ig_thread_id: str | None = None
     fans_thread_id: str | None = None
@@ -76,6 +77,7 @@ def load_settings() -> Settings:
     fans_guid = os.getenv("FANS_GUID", "").strip() or None
     fans_target = os.getenv("FANS_TARGET", "").strip() or None
     fans_refresh_token = os.getenv("FANS_REFRESH_TOKEN", "").strip() or None
+    fans_email_user = os.getenv("FANS_EMAIL", "").strip() or None
 
     fans_poll_interval_raw = os.getenv("FANS_POLL_INTERVAL", "300").strip()
     try:
