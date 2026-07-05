@@ -27,7 +27,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
-for noisy in ("instagrapi", "private_request"):
+for noisy in ("instagrapi", "private_request", "pyngrok"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
@@ -810,7 +810,10 @@ async def _yt_push_notifier(
     yt_thread_id: str | None,
     yt_state: YouTubeStateStore,
 ) -> None:
-    try:
+    channel_ids = [_normalize_channel_id(c) for c in yt_targets]
+    logger.info("Bắt đầu YouTube notifier với %s kênh", len(yt_targets))
+
+    for attempt in range(3):
         ngrok.set_auth_token(ngrok_token)
         notifier = AsyncYouTubeNotifier()
 
@@ -818,11 +821,9 @@ async def _yt_push_notifier(
         async def on_yt_upload(video: Video) -> None:
             await _handle_yt_video(video, yt_webhook, yt_role, yt_thread_id, yt_state)
 
-        logger.info("Bắt đầu YouTube notifier với %s kênh", len(yt_targets))
-        channel_ids = [_normalize_channel_id(c) for c in yt_targets]
-
         yt_task = asyncio.create_task(notifier.run())
 
+        ok = False
         try:
             start = asyncio.get_event_loop().time()
             while not notifier.is_ready:
@@ -830,39 +831,45 @@ async def _yt_push_notifier(
                     try:
                         yt_task.result()
                     except Exception as exc:
-                        logger.warning("YouTube notifier thất bại ngay lập tức: %s", exc)
-                    return
+                        if attempt < 2:
+                            logger.warning("YouTube notifier lỗi lần %s: %s — thử lại...", attempt + 1, exc)
+                        else:
+                            logger.warning("YouTube notifier thất bại sau 3 lần: %s", exc)
+                    break
                 if asyncio.get_event_loop().time() - start > 30:
                     raise asyncio.TimeoutError
                 await asyncio.sleep(1)
+            else:
+                try:
+                    await notifier.subscribe(channel_ids)
+                except Exception as exc:
+                    if attempt < 2:
+                        logger.warning("YouTube subscribe lỗi lần %s: %s — thử lại...", attempt + 1, exc)
+                    else:
+                        logger.warning("YouTube subscribe thất bại sau 3 lần: %s", exc)
+                    break
+
+                logger.info("YouTube notifier đã sẵn sàng")
+                ok = True
+                await yt_task
         except asyncio.TimeoutError:
-            logger.warning("YouTube push notification không khả dụng (ngrok) sau 30s — bỏ qua")
-            notifier.stop()
-            yt_task.cancel()
-            try:
-                await yt_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            if attempt < 2:
+                logger.warning("YouTube push không khả dụng (ngrok) sau 30s lần %s — thử lại...", attempt + 1)
+            else:
+                logger.warning("YouTube push không khả dụng (ngrok) sau 30s — bỏ qua")
+
+        if ok:
             return
 
-        try:
-            await notifier.subscribe(channel_ids)
-        except Exception as exc:
-            logger.warning("YouTube subscribe thất bại: %s — bỏ qua YouTube", exc)
-            notifier.stop()
-            yt_task.cancel()
-            try:
-                await yt_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            return
-
-        logger.info("YouTube notifier đã sẵn sàng")
-        await yt_task
-    except asyncio.CancelledError:
         notifier.stop()
-    except Exception as exc:
-        logger.warning("YouTube push notification thất bại: %s", exc)
+        yt_task.cancel()
+        try:
+            await yt_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        if attempt < 2:
+            await asyncio.sleep(3)
 
 
 def main() -> None:
