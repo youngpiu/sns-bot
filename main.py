@@ -295,6 +295,19 @@ def download_urls(
     return temp_dir, downloaded_files
 
 
+def send_error_alert(webhook_url: str | None, message: str) -> None:
+    if not webhook_url:
+        return
+    try:
+        requests.post(
+            webhook_url,
+            json={"content": f"```\n{message[:1800]}\n```"},
+            timeout=30,
+        )
+    except Exception as exc:
+        logger.warning("Gửi error alert thất bại: %s", exc)
+
+
 MAX_FILES_PER_WEBHOOK = 10
 
 
@@ -372,6 +385,7 @@ async def poll_instagram(
     target_username: str,
     interval_seconds: int,
     thread_id: str | None = None,
+    error_webhook_url: str | None = None,
 ) -> None:
     state_store.load()
     logger.info("Bắt đầu poll Instagram, chu kỳ %s giây", interval_seconds)
@@ -431,11 +445,15 @@ async def poll_instagram(
                 state_store.save()
                 logger.info("Đã gửi Discord webhook cho Instagram media pk %s", media.pk)
         except InstagramLoginError as exc:
-            logger.error("Đăng nhập Instagram thất bại: %s", exc)
+            logger.error("Đăng nhập Instagram thất bại, dừng task: %s", exc)
+            send_error_alert(error_webhook_url, f"Instagram @{target_username} login failed: {exc}")
+            return
         except DiscordWebhookError as exc:
             logger.error("Gửi Discord webhook thất bại: %s", exc)
         except Exception:
-            logger.exception("Chu kỳ poll Instagram thất bại")
+            logger.exception("Instagram lỗi, dừng task")
+            send_error_alert(error_webhook_url, f"Instagram @{target_username} stopped: unexpected error")
+            return
 
         await asyncio.sleep(interval_seconds)
 
@@ -448,6 +466,7 @@ async def poll_fans(
     target_group: str,
     interval_seconds: int,
     thread_id: str | None = None,
+    error_webhook_url: str | None = None,
 ) -> None:
     state_store.load()
     logger.info("Bắt đầu poll Fans cho %s, chu kỳ %s giây", target_group, interval_seconds)
@@ -557,11 +576,15 @@ async def poll_fans(
                     )
 
         except FansAuthError as exc:
-            logger.error("Xác thực Fans thất bại: %s", exc)
+            logger.error("Xác thực Fans thất bại, dừng task: %s", exc)
+            send_error_alert(error_webhook_url, f"Fans {target_group} auth failed: {exc}")
+            return
         except FansAPIError as exc:
             logger.error("Fans API lỗi: %s", exc)
         except Exception:
-            logger.exception("Chu kỳ poll Fans thất bại")
+            logger.exception("Fans lỗi, dừng task")
+            send_error_alert(error_webhook_url, f"Fans {target_group} stopped: unexpected error")
+            return
 
         await asyncio.sleep(interval_seconds)
 
@@ -574,6 +597,7 @@ async def poll_twitter(
     target_username: str,
     interval_seconds: int,
     thread_id: str | None = None,
+    error_webhook_url: str | None = None,
 ) -> None:
     state_store.load()
     logger.info("Bắt đầu poll Twitter cho @%s, chu kỳ %s giây", target_username, interval_seconds)
@@ -582,6 +606,7 @@ async def poll_twitter(
         await twitter.authenticate()
     except TwitterLoginError as exc:
         logger.error("Twitter không được xác thực, bỏ qua: %s", exc)
+        send_error_alert(error_webhook_url, f"Twitter @{target_username} auth failed: {exc}")
         return
 
     while True:
@@ -652,6 +677,7 @@ async def poll_twitter(
                 logger.info("Đã gửi Discord webhook cho Twitter tweet %s", tweet.id)
         except Exception:
             logger.warning("Twitter lỗi, dừng task", exc_info=True)
+            send_error_alert(error_webhook_url, f"Twitter @{target_username} stopped: unexpected error")
             return
 
         await asyncio.sleep(interval_seconds)
@@ -741,6 +767,7 @@ async def run_all(settings) -> None:
             target_username=settings.ig_target,
             interval_seconds=settings.poll_interval,
             thread_id=settings.ig_thread_id,
+            error_webhook_url=settings.error_webhook_url,
         )
     )
 
@@ -765,6 +792,7 @@ async def run_all(settings) -> None:
                         target_group=settings.fans_target,
                         interval_seconds=settings.fans_poll_interval,
                         thread_id=settings.fans_thread_id,
+                        error_webhook_url=settings.error_webhook_url,
                     )
                 )
         else:
@@ -785,6 +813,7 @@ async def run_all(settings) -> None:
                     yt_role=settings.yt_role_id,
                     yt_thread_id=settings.yt_thread_id,
                     yt_state=yt_state,
+                    error_webhook_url=settings.error_webhook_url,
                 )
             )
 
@@ -808,6 +837,7 @@ async def run_all(settings) -> None:
                     target_username=settings.twitter_target,
                     interval_seconds=settings.twitter_poll_interval,
                     thread_id=settings.twitter_thread_id,
+                    error_webhook_url=settings.error_webhook_url,
                 )
             )
 
@@ -825,6 +855,7 @@ async def _yt_push_notifier(
     yt_role: str,
     yt_thread_id: str | None,
     yt_state: YouTubeStateStore,
+    error_webhook_url: str | None = None,
 ) -> None:
     channel_ids = [_normalize_channel_id(c) for c in yt_targets]
     logger.info("Bắt đầu YouTube notifier với %s kênh", len(yt_targets))
@@ -851,6 +882,7 @@ async def _yt_push_notifier(
                             logger.warning("YouTube notifier lỗi lần %s: %s — thử lại...", attempt + 1, exc)
                         else:
                             logger.warning("YouTube notifier thất bại sau 3 lần: %s", exc)
+                            send_error_alert(error_webhook_url, f"YouTube notifier failed after 3 attempts: {exc}")
                     break
                 if asyncio.get_event_loop().time() - start > 30:
                     raise asyncio.TimeoutError
@@ -863,6 +895,7 @@ async def _yt_push_notifier(
                         logger.warning("YouTube subscribe lỗi lần %s: %s — thử lại...", attempt + 1, exc)
                     else:
                         logger.warning("YouTube subscribe thất bại sau 3 lần: %s", exc)
+                        send_error_alert(error_webhook_url, f"YouTube subscribe failed after 3 attempts: {exc}")
                     break
 
                 logger.info("YouTube notifier đã sẵn sàng")
@@ -873,6 +906,7 @@ async def _yt_push_notifier(
                 logger.warning("YouTube push không khả dụng (ngrok) sau 30s lần %s — thử lại...", attempt + 1)
             else:
                 logger.warning("YouTube push không khả dụng (ngrok) sau 30s — bỏ qua")
+                send_error_alert(error_webhook_url, "YouTube push unavailable (ngrok timeout) after 3 attempts")
 
         if ok:
             return

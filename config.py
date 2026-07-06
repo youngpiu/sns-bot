@@ -36,6 +36,7 @@ class Settings:
     twitter_poll_interval: int = 300
     twitter_thread_id: str | None = None
     twitter_auth_token: str | None = None
+    error_webhook_url: str | None = None
     gemini_api_key: str | None = None
 
 
@@ -115,6 +116,7 @@ def load_settings() -> Settings:
 
     twitter_thread_id = os.getenv("TWITTER_THREAD_ID", "").strip() or None
     twitter_auth_token = os.getenv("TWITTER_AUTH_TOKEN", "").strip() or None
+    error_webhook_url = os.getenv("ERROR_WEBHOOK", "").strip() or None
     gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip() or None
 
     return Settings(
@@ -141,5 +143,6 @@ def load_settings() -> Settings:
         twitter_poll_interval=twitter_poll_interval,
         twitter_thread_id=twitter_thread_id,
         twitter_auth_token=twitter_auth_token,
+        error_webhook_url=error_webhook_url,
         gemini_api_key=gemini_api_key,
     )
