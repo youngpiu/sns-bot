@@ -84,9 +84,14 @@ class InstagramClient:
         if self.session_file.exists():
             try:
                 self.client.load_settings(str(self.session_file))
-                logger.info("Đã tải Instagram session từ %s", self.session_file)
+                logger.info("Đã tải Instagram session từ file %s", self.session_file)
+                user_id = self.client.user_id
+                if user_id:
+                    logger.info("Session file còn hiệu lực (user_id=%s), bỏ qua đăng nhập lại", user_id)
+                    self._logged_in = True
+                    return
             except Exception:
-                logger.warning("Không tải được Instagram session; tiếp tục với password login")
+                logger.warning("Không tải được Instagram session từ file")
 
         try:
             if self.sessionid:
