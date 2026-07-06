@@ -94,11 +94,14 @@ class InstagramClient:
                 logger.warning("Không tải được Instagram session từ file")
 
         try:
-            if self.sessionid:
+            if self.username and self.password:
+                logger.info("Đang đăng nhập Instagram bằng username/password")
+                self.client.login(self.username, self.password)
+            elif self.sessionid:
                 logger.info("Đang đăng nhập Instagram bằng sessionid")
                 self.client.login_by_sessionid(self.sessionid)
             else:
-                self.client.login(self.username, self.password)
+                raise InstagramLoginError("Missing credentials: set IG_USERNAME+IG_PASSWORD or IG_SESSIONID in .env")
         except TypeError as exc:
             if "NoneType" in str(exc):
                 raise InstagramLoginError(
