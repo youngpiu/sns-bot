@@ -756,7 +756,6 @@ async def run_all(settings) -> None:
         session_file=settings.instagram_session_file,
         username=settings.ig_username or "",
         password=settings.ig_password or "",
-        sessionid=settings.ig_sessionid or "",
         proxy=settings.ig_proxy,
     )
     ig_state = InstagramStateStore(IG_STATE_FILE)

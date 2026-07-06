@@ -63,13 +63,11 @@ class InstagramClient:
         username: str = "",
         password: str = "",
         proxy: str | None = None,
-        sessionid: str | None = None,
     ) -> None:
         self.username = username
         self.password = password
         self.target_username = target_username
         self.session_file = session_file
-        self.sessionid = sessionid
         self.client = Client()
         self.client.delay_range = [1, 3]
         if proxy:
@@ -94,14 +92,10 @@ class InstagramClient:
                 logger.warning("Không tải được Instagram session từ file")
 
         try:
-            if self.username and self.password:
-                logger.info("Đang đăng nhập Instagram bằng username/password")
-                self.client.login(self.username, self.password)
-            elif self.sessionid:
-                logger.info("Đang đăng nhập Instagram bằng sessionid")
-                self.client.login_by_sessionid(self.sessionid)
-            else:
-                raise InstagramLoginError("Missing credentials: set IG_USERNAME+IG_PASSWORD or IG_SESSIONID in .env")
+            if not self.username or not self.password:
+                raise InstagramLoginError("Missing IG_USERNAME or IG_PASSWORD in .env")
+            logger.info("Đang đăng nhập Instagram bằng username/password")
+            self.client.login(self.username, self.password)
         except TypeError as exc:
             if "NoneType" in str(exc):
                 raise InstagramLoginError(
@@ -126,11 +120,7 @@ class InstagramClient:
                 "Instagram blocked the current proxy/IP. Use a cleaner stable proxy or the account's "
                 "normal network, then restart the bot."
             ) from exc
-        except AssertionError as exc:
-            raise InstagramLoginError(
-                "IG_SESSIONID is invalid. Copy the full sessionid cookie value from a logged-in "
-                "Instagram browser session."
-            ) from exc
+
 
         self.session_file.parent.mkdir(parents=True, exist_ok=True)
         self.client.dump_settings(str(self.session_file))

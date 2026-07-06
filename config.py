@@ -16,7 +16,6 @@ class Settings:
     role_id: str
     ig_target: str
     ig_proxy: str | None = None
-    ig_sessionid: str | None = None
     ig_username: str | None = None
     ig_password: str | None = None
     poll_interval: int = 600
@@ -57,7 +56,6 @@ def load_settings() -> Settings:
     role_id = required("IG_ROLE")
     ig_target = required("IG_TARGET")
 
-    ig_sessionid = os.getenv("IG_SESSIONID", "").strip() or None
     ig_username = os.getenv("IG_USERNAME", "").strip() or None
     ig_password = os.getenv("IG_PASSWORD", "").strip() or None
 
@@ -128,7 +126,6 @@ def load_settings() -> Settings:
         role_id=role_id,
         ig_target=ig_target,
         ig_proxy=os.getenv("IG_PROXY", "").strip() or None,
-        ig_sessionid=ig_sessionid,
         ig_username=ig_username,
         ig_password=ig_password,
         poll_interval=poll_interval,
