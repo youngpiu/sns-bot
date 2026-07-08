@@ -106,19 +106,26 @@ class FansStateStore:
 class YouTubeStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._last_seen_id: str | None = None
+        # Lưu theo từng kênh: { channel_id: last_video_id }
+        self._seen: dict[str, str] = {}
 
     def load(self) -> YouTubeStateStore:
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
-                self._last_seen_id = str(data["last_seen_id"]) if data.get("last_seen_id") else None
+                # Hỗ trợ backward-compat: file cũ chỉ có last_seen_id (string)
+                if isinstance(data, dict):
+                    if "channels" in data:
+                        self._seen = {k: str(v) for k, v in data["channels"].items()}
+                    elif "last_seen_id" in data and data["last_seen_id"]:
+                        # Migrate: gán vào key đặc biệt "__legacy__"
+                        self._seen = {"__legacy__": str(data["last_seen_id"])}
             except (OSError, json.JSONDecodeError):
-                self._last_seen_id = None
+                self._seen = {}
         return self
 
     def save(self) -> None:
-        payload = {"last_seen_id": self._last_seen_id}
+        payload = {"channels": self._seen}
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         with NamedTemporaryFile(
@@ -133,18 +140,14 @@ class YouTubeStateStore:
 
         temp_path.replace(self.path)
 
-    def is_new(self, video_id: str) -> bool:
-        return True
+    def is_new(self, channel_id: str, video_id: str) -> bool:
+        return self._seen.get(channel_id) != video_id
 
-    def mark_seen(self, video_id: str) -> None:
-        self._last_seen_id = video_id
+    def mark_seen(self, channel_id: str, video_id: str) -> None:
+        self._seen[channel_id] = video_id
 
-    def is_initialized(self) -> bool:
-        return self._last_seen_id is not None
-
-    @property
-    def last_seen_id(self) -> str | None:
-        return self._last_seen_id
+    def is_initialized(self, channel_id: str) -> bool:
+        return channel_id in self._seen
 
 
 class TwitterStateStore:

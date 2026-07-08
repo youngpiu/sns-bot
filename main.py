@@ -697,7 +697,8 @@ async def _handle_yt_video(
     thread_id: str | None,
     state_store: YouTubeStateStore,
 ) -> None:
-    if video.id == state_store.last_seen_id:
+    channel_id = video.channel.id
+    if not state_store.is_new(channel_id, video.id):
         return
 
     logger.info("Video YouTube mới: id=%s title=%s channel=%s", video.id, video.title[:80], video.channel.name)
@@ -742,9 +743,10 @@ async def _handle_yt_video(
         if temp_dir is not None:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    state_store.mark_seen(video.id)
+    state_store.mark_seen(channel_id, video.id)
     state_store.save()
     logger.info("Đã gửi Discord webhook cho YouTube video %s", video.id)
+
 
 
 async def run_all(settings) -> None:
