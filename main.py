@@ -96,7 +96,9 @@ async def build_fans_discord_payload(
 
 
 async def build_twitter_discord_payload(role_id: str, tweet: TwitterTweet) -> dict[str, object]:
+    import re
     raw = tweet.text.strip()
+    raw = re.sub(r"https://t\.co/\w+", "", raw).strip()
     text = (await translator.translate(raw))[:2000] if raw else "(no content)"
     return {
         "content": f"```{text}```\n<@&{role_id}>",
