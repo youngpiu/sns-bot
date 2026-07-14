@@ -596,91 +596,96 @@ async def poll_twitter(
     state_store: TwitterStateStore,
     webhook_url: str,
     role_id: str,
-    target_username: str,
+    twitter_targets: tuple[str, ...],
     interval_seconds: int,
     thread_id: str | None = None,
     error_webhook_url: str | None = None,
 ) -> None:
     state_store.load()
-    logger.info("Bắt đầu poll Twitter cho @%s, chu kỳ %s giây", target_username, interval_seconds)
+    targets_str = ", ".join(twitter_targets)
+    logger.info("Bắt đầu poll Twitter cho %s, chu kỳ %s giây", targets_str, interval_seconds)
 
     try:
         await twitter.authenticate()
     except TwitterLoginError as exc:
         logger.error("Twitter không được xác thực, bỏ qua: %s", exc)
-        send_error_alert(error_webhook_url, f"Twitter @{target_username} auth failed: {exc}")
+        send_error_alert(error_webhook_url, f"Twitter auth failed cho {targets_str}: {exc}")
         return
 
     while True:
         try:
-            tweets = await twitter.recent_tweets()
-            if not tweets:
-                logger.info("Không có tweet Twitter nào cho @%s", target_username)
-                await asyncio.sleep(interval_seconds)
-                continue
-
-            if not state_store.is_initialized():
-                state_store.mark_seen(tweets[0].id)
-                state_store.save()
-                logger.info("Đã khởi tạo state Twitter với tweet id=%s", state_store.last_seen_id)
-                await asyncio.sleep(interval_seconds)
-                continue
-
-            new_tweets: list[TwitterTweet] = []
-            for t in tweets:
-                if t.id == state_store.last_seen_id:
-                    break
-                new_tweets.append(t)
-
-            if not new_tweets:
-                logger.info("Không có tweet Twitter mới cho @%s", target_username)
-            else:
-                logger.info("Tìm thấy %s tweet Twitter mới cho @%s", len(new_tweets), target_username)
-
-            for tweet in new_tweets:
-                logger.info(
-                    "Tweet Twitter mới: id=%s media_count=%s",
-                    tweet.id,
-                    len(tweet.media_urls),
-                )
-                payload = await build_twitter_discord_payload(role_id, tweet)
-                temp_dir: Path | None = None
+            for target_username in twitter_targets:
                 try:
-                    if tweet.media_urls:
-                        temp_dir, paths = await asyncio.to_thread(
-                            download_urls,
-                            tweet.media_urls[:10],
-                            prefix=f"twitter-{tweet.id}-",
-                            log_label=f"tweet={tweet.id}",
-                        )
+                    tweets = await twitter.recent_tweets(target_username)
+                    if not tweets:
+                        logger.info("Không có tweet Twitter nào cho @%s", target_username)
+                        continue
+
+                    if not state_store.is_initialized(target_username):
+                        state_store.mark_seen(target_username, tweets[0].id)
+                        state_store.save()
+                        logger.info("Đã khởi tạo state Twitter cho @%s với tweet id=%s", target_username, tweets[0].id)
+                        continue
+
+                    new_tweets: list[TwitterTweet] = []
+                    last_seen_id = state_store.get_last_seen_id(target_username)
+                    for t in tweets:
+                        if t.id == last_seen_id:
+                            break
+                        new_tweets.append(t)
+
+                    if not new_tweets:
+                        logger.info("Không có tweet Twitter mới cho @%s", target_username)
                     else:
-                        paths = []
+                        logger.info("Tìm thấy %s tweet Twitter mới cho @%s", len(new_tweets), target_username)
 
-                    base_url = f"{webhook_url}?wait=true&with_components=true"
-                    send_tasks = [
-                        asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
-                    ]
-                    if thread_id:
-                        thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
-                        thread_payload = _without_role_mention(payload, role_id)
-                        send_tasks.append(
-                            asyncio.to_thread(send_discord_webhook, thread_url, thread_payload, paths),
+                    for tweet in new_tweets:
+                        logger.info(
+                            "Tweet Twitter mới (@%s): id=%s media_count=%s",
+                            target_username,
+                            tweet.id,
+                            len(tweet.media_urls),
                         )
-                    await asyncio.gather(*send_tasks)
-                except DiscordWebhookError as exc:
-                    logger.error("Gửi Discord webhook thất bại: %s", exc)
-                    continue
-                finally:
-                    if temp_dir is not None:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        payload = await build_twitter_discord_payload(role_id, tweet)
+                        temp_dir: Path | None = None
+                        try:
+                            if tweet.media_urls:
+                                temp_dir, paths = await asyncio.to_thread(
+                                    download_urls,
+                                    tweet.media_urls[:10],
+                                    prefix=f"twitter-{tweet.id}-",
+                                    log_label=f"tweet={tweet.id}",
+                                )
+                            else:
+                                paths = []
 
-                state_store.mark_seen(tweet.id)
-                state_store.save()
-                logger.info("Đã gửi Discord webhook cho Twitter tweet %s", tweet.id)
+                            base_url = f"{webhook_url}?wait=true&with_components=true"
+                            send_tasks = [
+                                asyncio.to_thread(send_discord_webhook, base_url, payload, paths),
+                            ]
+                            if thread_id:
+                                thread_url = f"{webhook_url}?wait=true&with_components=true&thread_id={thread_id}"
+                                thread_payload = _without_role_mention(payload, role_id)
+                                send_tasks.append(
+                                    asyncio.to_thread(send_discord_webhook, thread_url, thread_payload, paths),
+                                )
+                            await asyncio.gather(*send_tasks)
+                        except DiscordWebhookError as exc:
+                            logger.error("Gửi Discord webhook thất bại (@%s): %s", target_username, exc)
+                            continue
+                        finally:
+                            if temp_dir is not None:
+                                shutil.rmtree(temp_dir, ignore_errors=True)
+
+                        state_store.mark_seen(target_username, tweet.id)
+                        state_store.save()
+                        logger.info("Đã gửi Discord webhook cho Twitter tweet %s (@%s)", tweet.id, target_username)
+                except Exception:
+                    logger.error("Lỗi poll_twitter cho @%s", target_username, exc_info=True)
+                    send_error_alert(error_webhook_url, f"Twitter @{target_username} stopped: unexpected error")
         except Exception:
-            logger.warning("Twitter lỗi, dừng task", exc_info=True)
-            send_error_alert(error_webhook_url, f"Twitter @{target_username} stopped: unexpected error")
-            return
+            logger.warning("Twitter loop lỗi", exc_info=True)
+            send_error_alert(error_webhook_url, f"Twitter poll loop error")
 
         await asyncio.sleep(interval_seconds)
 
@@ -822,14 +827,13 @@ async def run_all(settings) -> None:
                 )
             )
 
-    if settings.twitter_target:
+    if settings.twitter_targets:
         if not settings.twitter_auth_token:
             logger.warning("Cần TWITTER_AUTH_TOKEN trong .env để dùng Twitter — bỏ qua")
         elif not settings.twitter_webhook_url or not settings.twitter_role_id:
             logger.warning("Thiếu TWITTER_WEBHOOK hoặc TWITTER_ROLE trong .env — bỏ qua Twitter")
         else:
             twitter_client = TwitterClient(
-                target_username=settings.twitter_target,
                 auth_token=settings.twitter_auth_token,
             )
             twitter_state = TwitterStateStore(TWITTER_STATE_FILE).load()
@@ -839,7 +843,7 @@ async def run_all(settings) -> None:
                     state_store=twitter_state,
                     webhook_url=settings.twitter_webhook_url,
                     role_id=settings.twitter_role_id,
-                    target_username=settings.twitter_target,
+                    twitter_targets=settings.twitter_targets,
                     interval_seconds=settings.twitter_poll_interval,
                     thread_id=settings.twitter_thread_id,
                     error_webhook_url=settings.error_webhook_url,

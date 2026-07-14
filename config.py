@@ -33,7 +33,7 @@ class Settings:
     ngrok_token: str | None = None
     twitter_webhook_url: str | None = None
     twitter_role_id: str | None = None
-    twitter_target: str | None = None
+    twitter_targets: tuple[str, ...] = ()
     twitter_poll_interval: int = 300
     twitter_thread_id: str | None = None
     twitter_auth_token: str | None = None
@@ -105,7 +105,11 @@ def load_settings() -> Settings:
 
     twitter_webhook_url = os.getenv("TWITTER_WEBHOOK", "").strip() or None
     twitter_role_id = os.getenv("TWITTER_ROLE", "").strip() or None
-    twitter_target = os.getenv("TWITTER_TARGET", "").strip() or None
+    
+    twitter_targets_raw = os.getenv("TWITTER_TARGETS", "").strip()
+    twitter_targets: tuple[str, ...] = ()
+    if twitter_targets_raw:
+        twitter_targets = tuple(t.strip() for t in twitter_targets_raw.split(",") if t.strip())
 
     twitter_poll_interval_raw = os.getenv("TWITTER_POLL_INTERVAL", "300").strip()
     try:
@@ -142,7 +146,7 @@ def load_settings() -> Settings:
         ngrok_token=ngrok_token,
         twitter_webhook_url=twitter_webhook_url,
         twitter_role_id=twitter_role_id,
-        twitter_target=twitter_target,
+        twitter_targets=twitter_targets,
         twitter_poll_interval=twitter_poll_interval,
         twitter_thread_id=twitter_thread_id,
         twitter_auth_token=twitter_auth_token,

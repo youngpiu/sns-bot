@@ -153,19 +153,23 @@ class YouTubeStateStore:
 class TwitterStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._last_seen_id: str | None = None
+        self._seen: dict[str, str] = {}
 
     def load(self) -> TwitterStateStore:
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
-                self._last_seen_id = str(data["last_seen_id"]) if data.get("last_seen_id") else None
+                if isinstance(data, dict):
+                    if "targets" in data:
+                        self._seen = {k: str(v) for k, v in data["targets"].items()}
+                    elif "last_seen_id" in data and data["last_seen_id"]:
+                        self._seen = {"__legacy__": str(data["last_seen_id"])}
             except (OSError, json.JSONDecodeError):
-                self._last_seen_id = None
+                self._seen = {}
         return self
 
     def save(self) -> None:
-        payload = {"last_seen_id": self._last_seen_id}
+        payload = {"targets": self._seen}
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         with NamedTemporaryFile(
@@ -180,15 +184,14 @@ class TwitterStateStore:
 
         temp_path.replace(self.path)
 
-    def is_new(self, tweet_id: str) -> bool:
+    def is_new(self, target: str, tweet_id: str) -> bool:
         return True
 
-    def mark_seen(self, tweet_id: str) -> None:
-        self._last_seen_id = tweet_id
+    def mark_seen(self, target: str, tweet_id: str) -> None:
+        self._seen[target] = tweet_id
 
-    def is_initialized(self) -> bool:
-        return self._last_seen_id is not None
+    def is_initialized(self, target: str) -> bool:
+        return target in self._seen or "__legacy__" in self._seen
 
-    @property
-    def last_seen_id(self) -> str | None:
-        return self._last_seen_id
+    def get_last_seen_id(self, target: str) -> str | None:
+        return self._seen.get(target) or self._seen.get("__legacy__")

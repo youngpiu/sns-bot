@@ -60,12 +60,10 @@ if tweety_tx is not None:
 class TwitterClient:
     def __init__(
         self,
-        target_username: str,
         auth_token: str | None = None,
     ) -> None:
         if TwitterAsync is None:
             raise TwitterLoginError("tweety chưa được cài đặt (pip install tweety-ns)")
-        self.target_username = target_username
         self.auth_token = auth_token
         self.app = TwitterAsync(str(TWITTER_SESSION_FILE))
         self._authenticated = False
@@ -96,10 +94,10 @@ class TwitterClient:
 
         raise TwitterLoginError(f"Twitter chưa được xác thực")
 
-    async def recent_tweets(self) -> list[TwitterTweet]:
+    async def recent_tweets(self, target_username: str) -> list[TwitterTweet]:
         await self.authenticate()
 
-        user_id = await self.app.get_user_id(self.target_username)
+        user_id = await self.app.get_user_id(target_username)
         await self.app.enable_user_notification(user_id)
 
         notifications = await self.app.get_tweet_notifications(pages=1)
@@ -125,5 +123,5 @@ class TwitterClient:
             ))
 
         result.sort(key=lambda tw: tw.created_on or datetime.min, reverse=True)
-        logger.info("Tìm thấy %s tweet Twitter cho @%s", len(result), self.target_username)
+        logger.info("Tìm thấy %s tweet Twitter cho @%s", len(result), target_username)
         return result
