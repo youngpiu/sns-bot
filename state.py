@@ -191,7 +191,7 @@ class TwitterStateStore:
         self._seen[target] = tweet_id
 
     def is_initialized(self, target: str) -> bool:
-        return target in self._seen or "__legacy__" in self._seen
+        return target in self._seen
 
     def get_last_seen_id(self, target: str) -> str | None:
-        return self._seen.get(target) or self._seen.get("__legacy__")
+        return self._seen.get(target)

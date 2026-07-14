@@ -416,7 +416,7 @@ async def poll_instagram(
             else:
                 logger.info("Tìm thấy %s media Instagram mới cho @%s", len(new_medias), target_username)
 
-            for media in new_medias:
+            for media in reversed(new_medias):
                 logger.info(
                     "Media Instagram mới: pk=%s url_count=%s type=%s product_type=%s",
                     media.pk,
@@ -500,7 +500,7 @@ async def poll_fans(
             else:
                 logger.info("Tìm thấy %s thông báo Fans mới cho %s", len(new_notifs), target_group)
 
-            for notif in new_notifs:
+            for notif in reversed(new_notifs):
                     logger.info(
                         "Thông báo Fans mới: id=%s category=%s group=%s",
                         notif.id,
@@ -639,7 +639,7 @@ async def poll_twitter(
                     else:
                         logger.info("Tìm thấy %s tweet Twitter mới cho @%s", len(new_tweets), target_username)
 
-                    for tweet in new_tweets:
+                    for tweet in reversed(new_tweets):
                         logger.info(
                             "Tweet Twitter mới (@%s): id=%s media_count=%s",
                             target_username,
