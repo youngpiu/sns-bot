@@ -1,67 +1,93 @@
 # SNS Discord Bot
 
-Python bot that checks the latest Instagram post from one target account with
-`instagrapi` and sends a notification to one Discord webhook.
+Python bot that monitors K-pop artist social media accounts and sends notifications to Discord webhooks.
+
+## Supported Platforms
+
+| Platform | Status | Requirements |
+|---|---|---|
+| Instagram | Required | `IG_USERNAME` + `IG_PASSWORD` |
+| JYP Fans | Optional | Logged-in session (run `login.py`) |
+| X (Twitter) | Optional | `TWITTER_AUTH_TOKEN` from browser cookie |
+| YouTube | Optional | `NGROK_TOKEN` to expose webhook |
+
+Extra features:
+- Korean → Vietnamese translation via Gemini
+- Discord thread support (optional)
+- Per-platform webhook
+- Error alert via separate webhook
 
 ## Setup
-
-1. Create a virtual environment:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-2. Install dependencies:
+Copy `.env.example` to `.env` and fill in the values.
 
-```powershell
-python -m pip install -r requirements.txt
-```
-
-3. Copy `.env.example` to `.env` and fill in values:
-
+### Instagram
 ```dotenv
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-DISCORD_ROLE_ID=1488594717842342053
-INSTAGRAM_USERNAME=your_instagram_login_username
-INSTAGRAM_PASSWORD=your_instagram_login_password
-INSTAGRAM_TARGET_USERNAME=instagram_account_to_watch
-INSTAGRAM_PROXY=
-INSTAGRAM_SESSIONID=
-POLL_INTERVAL_SECONDS=600
+IG_USERNAME=...
+IG_PASSWORD=...
+IG_TARGET=nmixx_official
 ```
 
-4. Run the bot:
+### JYP Fans
+Run the interactive login script:
+```powershell
+python login.py
+```
+Enter your email, get the verification code from your email, and enter it. The session is saved to `sessions/fans_session.json`.
+
+### X (Twitter)
+Get `auth_token` from your browser cookies after logging into Twitter.
+
+### YouTube (push notification)
+1. Register a token at https://dashboard.ngrok.com/get-started/your-authtoken
+2. Set `NGROK_TOKEN`
+3. The bot will auto-expose a webhook and subscribe to YouTube push notifications
+
+## Run
 
 ```powershell
 python main.py
 ```
 
-## Behavior
+## Project Structure
 
-- The first run initializes `state.json` with the current latest Instagram post
-  and does not send an old post to Discord.
-- Later runs fetch the 6 most recent profile media items, sort them by
-  `taken_at`, and send every item newer than the saved state.
-- `state.json` stores the last successfully sent media PK and timestamp so posts
-  made between polling cycles are not skipped when they are still in the latest
-  6 media items.
-- The watched profile media types are photo posts, feed videos, carousel albums,
-  and reels when Instagram returns them through the profile media endpoint.
-- Discord messages are sent through a webhook with media uploaded as
-  attachments.
-- Instagram login settings are saved to `instagram_session.json` to reduce
-  repeated login prompts and rate-limit risk.
+```
+sns-bot/
+├── main.py                   # Entry point, polling loops
+├── config.py                 # Config loaded from .env
+├── login.py                  # Interactive Fans login
+├── providers/
+│   ├── fans.py               # Fans GraphQL client
+│   ├── ig.py                 # Instagram client (instagrapi)
+│   ├── twitter.py            # Twitter client (tweety-ns)
+│   ├── yt.py                 # YouTube push notification
+│   └── translator.py         # Gemini translation
+├── sessions/                 # Saved sessions (tokens, cookies)
+├── states/                   # Last-seen state per platform
+├── .env                      # Secrets (do not commit)
+└── prompt.txt                # Gemini translation prompt
+```
+
+## JYP Fans Notification Categories
+
+From `api.app.fans` GraphQL API:
+
+**Community:**
+- `POST_CREATED_BY_ARTIST` — Artist created a new post *(currently tracked)*
+- `COMMENT_CREATED_BY_ARTIST` — Artist commented on a fan's post
+- `POST_LIKE_CREATED_BY_ARTIST` — Artist liked a fan's post
+
+**Shop:**
+- `NOTICE` — Shop notices (shipping, payments...)
 
 ## Notes
 
-- Keep `.env` and `instagram_session.json` private.
-- If Instagram keeps returning rate-limit, challenge, or login trust errors,
-  open Instagram manually on a trusted device first. For server automation, use
-  one stable proxy/IP in `INSTAGRAM_PROXY`, for example
-  `http://username:password@host:port`.
-- If password login is blocked, set `INSTAGRAM_SESSIONID` from a logged-in
-  browser cookie. The value usually starts with your numeric Instagram user ID.
-- Polling faster than 60 seconds is rejected by config validation.
-- Phase 1 covers Instagram only. Twitter and YouTube can be added later behind
-  separate provider modules.
+- Keep `.env` and `sessions/*` private (already in `.gitignore`)
+- Instagram needs a stable proxy when running on a server
+- Fans session expires periodically; auto-refresh is handled in code

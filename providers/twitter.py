@@ -114,9 +114,17 @@ class TwitterClient:
                     if url:
                         media_urls.append(url)
             created = getattr(t, "created_on", None) or getattr(t, "date", None)
+            text = getattr(t, "text", "") or ""
+            urls = getattr(t, "urls", [])
+            for u in urls:
+                url_str = getattr(u, "url", None)
+                expanded_str = getattr(u, "expanded_url", None)
+                if url_str and expanded_str:
+                    text = text.replace(url_str, expanded_str)
+                    
             result.append(TwitterTweet(
                 id=str(t.id),
-                text=getattr(t, "text", "") or "",
+                text=text,
                 url=getattr(t, "url", ""),
                 created_on=created,
                 media_urls=media_urls,

@@ -21,6 +21,13 @@ logger = logging.getLogger(__name__)
 API_URL = "https://api.app.fans/graphql"
 REFRESH_URL = "https://api.app.fans/account/auth/refresh"
 
+# NOTIFICATION_CATEGORIES - Các loại thông báo từ API
+# Community:
+#   POST_CREATED_BY_ARTIST   - Artist tạo bài post mới
+#   COMMENT_CREATED_BY_ARTIST - Artist comment vào post của fan
+#   POST_LIKE_CREATED_BY_ARTIST - Artist like post của fan
+# Shop:
+#   NOTICE                   - Thông báo shop (shipping, thanh toán...)
 NOTIFICATION_CATEGORIES: list[str] = [
     "POST_CREATED_BY_ARTIST",
 ]
