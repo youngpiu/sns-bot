@@ -97,15 +97,10 @@ class TwitterClient:
     async def recent_tweets(self, target_username: str) -> list[TwitterTweet]:
         await self.authenticate()
 
-        user_id = await self.app.get_user_id(target_username)
-        await self.app.enable_user_notification(user_id)
-
-        notifications = await self.app.get_tweet_notifications(pages=1)
-        tweets = [t for t in notifications if str(t.author.id) == str(user_id)]
-        tweets = [t for t in tweets if not getattr(t, "is_retweet", False)]
+        all_tweets = await self.app.get_tweets(target_username, pages=1)
 
         result: list[TwitterTweet] = []
-        for t in tweets[:20]:
+        for t in all_tweets[:20]:
             media_urls: list[str] = []
             media_list = getattr(t, "media", [])
             if media_list:
